@@ -5,24 +5,34 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
+	"os"
+	"text/tabwriter"
 	"todo/task"
+
+	"github.com/spf13/cobra"
 )
 
 // listCmd represents the list command
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List items in todo.",
-	Long:  ``,
-	Run: func(cmd *cobra.Command, args []string) {
-		items, err := task.ReadItems(dataFile)
-		if err != nil {
-			fmt.Printf("%v", err)
-			return
-		}
+	Long:  `listing the todo items in the datafile.`,
+	Run:   listRun,
+}
 
-		fmt.Println(items)
-	},
+func listRun(cmd *cobra.Command, args []string) {
+	items, err := task.ReadItems(dataFile)
+	if err != nil {
+		fmt.Printf("%v", err)
+		return
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 3, 0, 1, ' ', 0)
+	for _, i := range items {
+		fmt.Fprintln(w, i.PrettyP()+"\t"+i.Text+"\t")
+	}
+
+	w.Flush()
 }
 
 func init() {
