@@ -18,7 +18,7 @@ var addCmd = &cobra.Command{
 }
 
 func addRun(cmd *cobra.Command, args []string) {
-	items, err := task.ReadItems("/home/andrew/.tasks.json")
+	items, err := task.ReadItems(dataFile)
 	if err != nil {
 		fmt.Printf("%v", err)
 		return
@@ -27,7 +27,7 @@ func addRun(cmd *cobra.Command, args []string) {
 		items = append(items, task.Item{Text: x})
 	}
 
-	err = task.SaveItems("/home/andrew/.tasks.json", items)
+	err = task.SaveItems(dataFile, items)
 	if err != nil {
 		fmt.Printf("%v", err)
 		return

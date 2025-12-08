@@ -15,7 +15,7 @@ var listCmd = &cobra.Command{
 	Short: "List items in todo.",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		items, err := task.ReadItems("/home/andrew/.tasks.json")
+		items, err := task.ReadItems(dataFile)
 		if err != nil {
 			fmt.Printf("%v", err)
 			return
