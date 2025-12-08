@@ -5,9 +5,8 @@ package cmd
 
 import (
 	"fmt"
-	"todo/task"
-
 	"github.com/spf13/cobra"
+	"todo/task"
 )
 
 // addCmd represents the add command
@@ -19,15 +18,22 @@ var addCmd = &cobra.Command{
 }
 
 func addRun(cmd *cobra.Command, args []string) {
-	items := []task.Item{}
+	items, err := task.ReadItems("/home/andrew/.tasks.json")
+	if err != nil {
+		fmt.Printf("%v", err)
+		return
+	}
 	for _, x := range args {
 		items = append(items, task.Item{Text: x})
 	}
 
-	err := task.SaveItems("./.tasks.json", items)
+	err = task.SaveItems("/home/andrew/.tasks.json", items)
 	if err != nil {
-		_ = fmt.Errorf("%v", err)
+		fmt.Printf("%v", err)
+		return
 	}
+	fmt.Println("Items saved")
+	fmt.Println(items)
 }
 
 func init() {

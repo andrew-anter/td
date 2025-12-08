@@ -5,10 +5,8 @@ package cmd
 
 import (
 	"fmt"
-	"log"
-	"todo/task"
-
 	"github.com/spf13/cobra"
+	"todo/task"
 )
 
 // listCmd represents the list command
@@ -17,11 +15,12 @@ var listCmd = &cobra.Command{
 	Short: "List items in todo.",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		items, err := task.ReadItems("./.tasks.json")
+		items, err := task.ReadItems("/home/andrew/.tasks.json")
 		if err != nil {
-			log.Printf("%v", err)
-
+			fmt.Printf("%v", err)
+			return
 		}
+
 		fmt.Println(items)
 	},
 }
