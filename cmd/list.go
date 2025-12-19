@@ -11,6 +11,7 @@ import (
 	"todo/task"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -20,14 +21,15 @@ var (
 
 // listCmd represents the list command
 var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List items in todo.",
-	Long:  `listing the todo items in the datafile.`,
-	Run:   listRun,
+	Use:     "list",
+	Aliases: []string{"ls"},
+	Short:   "List items in todo.",
+	Long:    `listing the todo items in the datafile.`,
+	Run:     listRun,
 }
 
 func listRun(cmd *cobra.Command, args []string) {
-	items, err := task.ReadItems(dataFile)
+	items, err := task.ReadItems(viper.GetString("datafile"))
 	if err != nil {
 		fmt.Printf("%v", err)
 		return
@@ -46,8 +48,8 @@ func listRun(cmd *cobra.Command, args []string) {
 
 func init() {
 	rootCmd.AddCommand(listCmd)
-	listCmd.Flags().BoolVar(&doneOpt, "done", false, "Show 'Done' Todos")
-	listCmd.Flags().BoolVar(&allOpt, "all", false, "Show All Todos")
+	listCmd.Flags().BoolVarP(&allOpt, "all", "a", false, "Show All Todos")
+	listCmd.Flags().BoolVarP(&doneOpt, "done", "d", false, "Show 'Done' Todos")
 
 	// Here you will define your flags and configuration settings.
 

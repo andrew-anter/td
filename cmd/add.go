@@ -5,9 +5,13 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"todo/task"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
+
+var priority int
 
 // addCmd represents the add command
 var addCmd = &cobra.Command{
@@ -18,7 +22,7 @@ var addCmd = &cobra.Command{
 }
 
 func addRun(cmd *cobra.Command, args []string) {
-	items, err := task.ReadItems(dataFile)
+	items, err := task.ReadItems(viper.GetString("datafile"))
 	if err != nil {
 		fmt.Printf("%v", err)
 		return
@@ -29,14 +33,12 @@ func addRun(cmd *cobra.Command, args []string) {
 		items = append(items, item)
 	}
 
-	err = task.SaveItems(dataFile, items)
+	err = task.SaveItems(viper.GetString("datafile"), items)
 	if err != nil {
 		fmt.Printf("%v", err)
 		return
 	}
 }
-
-var priority int
 
 func init() {
 	rootCmd.AddCommand(addCmd)
