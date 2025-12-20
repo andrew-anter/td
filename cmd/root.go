@@ -43,32 +43,8 @@ func initConfig() {
 	}
 }
 
-// func initConfig() {
-// 	home, err := os.UserHomeDir()
-// 	if err != nil {
-// 		fmt.Println(err)
-// 		os.Exit(1)
-// 	}
-//
-// 	viper.AddConfigPath(home)
-// 	viper.SetConfigName(".todo")
-// 	viper.SetConfigType("yaml")
-//
-// 	viper.AutomaticEnv()
-// 	viper.SetEnvPrefix("todo")
-//
-// 	if err := viper.ReadInConfig(); err == nil {
-// 		fmt.Println("Using Config file:", viper.ConfigFileUsed())
-// 	} else {
-// 		fmt.Printf("Error reading config file: %s\n", err)
-// 	}
-// }
-
 func init() {
 	cobra.OnInitialize(initConfig)
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
 	home, err := homedir.Dir()
 	if err != nil {
 		log.Println("Unable to detect home directory. Please set data file using --datafile.")
