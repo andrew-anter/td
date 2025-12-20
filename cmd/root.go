@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
@@ -16,42 +17,87 @@ import (
 var cfgFile string
 var dataFile string
 
-// rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "todo",
 	Short: "todo application to help me work on my goals.",
-	Long:  ``,
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
 func initConfig() {
-	viper.SetConfigName(".todo")
-	viper.AddConfigPath("$HOME")
+	home, _ := homedir.Dir()
+
+	if cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+	} else {
+		viper.AddConfigPath(home)
+		viper.SetConfigType("yaml")
+		viper.SetConfigName(".todo")
+	}
+
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("todo")
 
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using Config file:", viper.ConfigFileUsed())
+	// Set a default in Viper so it can be written to the config file later
+	defaultDataPath := filepath.Join(home, ".tasks.json")
+	viper.SetDefault("datafile", defaultDataPath)
+
+	if err := viper.ReadInConfig(); err != nil {
+		// If config file not found, create a default one
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			createDefaultConfig(home)
+		} else {
+			log.Printf("Error reading config: %v", err)
+		}
 	}
+
+	// Priority: 1. Explicit Flag, 2. Config File, 3. Default
+	if dataFile == "" || dataFile == defaultDataPath {
+		dataFile = viper.GetString("datafile")
+	}
+
+	ensureDataFileExists()
 }
 
 func init() {
 	cobra.OnInitialize(initConfig)
-	home, err := homedir.Dir()
-	if err != nil {
-		log.Println("Unable to detect home directory. Please set data file using --datafile.")
-		return
+
+	home, _ := homedir.Dir()
+	defaultDataPath := filepath.Join(home, ".tasks.json")
+
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.todo.yaml)")
+	rootCmd.PersistentFlags().StringVar(&dataFile, "datafile", defaultDataPath, "data file to store tasks.")
+}
+
+func createDefaultConfig(home string) {
+	configPath := filepath.Join(home, ".todo.yaml")
+	// Only create if it truly doesn't exist
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		viper.Set("datafile", filepath.Join(home, ".tasks.json"))
+		if err := viper.SafeWriteConfigAs(configPath); err != nil {
+			log.Printf("Could not create default config: %v", err)
+		} else {
+			fmt.Printf("Created default config file: %s\n", configPath)
+		}
+	}
+}
+
+func ensureDataFileExists() {
+	dir := filepath.Dir(dataFile)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Fatalf("Failed to create directory %s: %v", dir, err)
+		}
 	}
 
-	rootCmd.PersistentFlags().StringVar(&dataFile, "datafile", home+string(os.PathSeparator)+".tasks.json", "data file to store tasks.")
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.tasks.yaml).")
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	if _, err := os.Stat(dataFile); os.IsNotExist(err) {
+		if err := os.WriteFile(dataFile, []byte("[]"), 0644); err != nil {
+			log.Fatalf("Failed to create data file %s: %v", dataFile, err)
+		}
+		fmt.Printf("Created data file: %s\n", dataFile)
+	}
 }
