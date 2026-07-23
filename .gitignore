@@ -1,0 +1,23 @@
+# Compiled binaries
+/td
+*.exe
+
+# Test / coverage output
+*.out
+*.test
+coverage.txt
+
+# Go workspace and module caches (in case anyone runs things in-tree)
+go.work
+go.work.sum
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS junk
+Thumbs.db

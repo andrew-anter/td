@@ -13,19 +13,18 @@ import (
 
 var priority int
 
-// addCmd represents the add command
 var addCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Add a new todo item to the list.",
-	Long:  ``,
-	Run:   addRun,
+	Use:           "add",
+	Short:         "Add a new todo item to the list.",
+	RunE:          addRun,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
-func addRun(cmd *cobra.Command, args []string) {
+func addRun(cmd *cobra.Command, args []string) error {
 	items, err := task.ReadItems(viper.GetString("datafile"))
 	if err != nil {
-		fmt.Printf("%v", err)
-		return
+		return fmt.Errorf("failed to read items: %w", err)
 	}
 	for _, x := range args {
 		item := task.Item{Text: x}
@@ -33,11 +32,10 @@ func addRun(cmd *cobra.Command, args []string) {
 		items = append(items, item)
 	}
 
-	err = task.SaveItems(viper.GetString("datafile"), items)
-	if err != nil {
-		fmt.Printf("%v", err)
-		return
+	if err := task.SaveItems(viper.GetString("datafile"), items); err != nil {
+		return fmt.Errorf("failed to save items: %w", err)
 	}
+	return nil
 }
 
 func init() {

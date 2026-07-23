@@ -15,7 +15,6 @@ import (
 )
 
 var cfgFile string
-var dataFile string
 
 var rootCmd = &cobra.Command{
 	Use:   "todo",
@@ -24,12 +23,16 @@ var rootCmd = &cobra.Command{
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 func initConfig() {
-	home, _ := homedir.Dir()
+	home, err := homedir.Dir()
+	if err != nil {
+		log.Fatalf("failed to determine home directory: %v", err)
+	}
 
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
@@ -41,6 +44,11 @@ func initConfig() {
 
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("todo")
+
+	// Bind --datafile so viper respects the CLI flag value above config/default.
+	if err := viper.BindPFlag("datafile", rootCmd.PersistentFlags().Lookup("datafile")); err != nil {
+		log.Printf("could not bind datafile flag: %v", err)
+	}
 
 	// Set a default in Viper so it can be written to the config file later
 	defaultDataPath := filepath.Join(home, ".tasks.json")
@@ -55,29 +63,26 @@ func initConfig() {
 		}
 	}
 
-	// Priority: 1. Explicit Flag, 2. Config File, 3. Default
-	if dataFile == "" || dataFile == defaultDataPath {
-		dataFile = viper.GetString("datafile")
-	}
-
 	ensureDataFileExists()
 }
 
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	home, _ := homedir.Dir()
+	home, err := homedir.Dir()
+	if err != nil {
+		log.Fatalf("failed to determine home directory: %v", err)
+	}
 	defaultDataPath := filepath.Join(home, ".tasks.json")
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.todo.yaml)")
-	rootCmd.PersistentFlags().StringVar(&dataFile, "datafile", defaultDataPath, "data file to store tasks.")
+	rootCmd.PersistentFlags().String("datafile", defaultDataPath, "data file to store tasks.")
 }
 
 func createDefaultConfig(home string) {
 	configPath := filepath.Join(home, ".todo.yaml")
 	// Only create if it truly doesn't exist
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		viper.Set("datafile", filepath.Join(home, ".tasks.json"))
 		if err := viper.SafeWriteConfigAs(configPath); err != nil {
 			log.Printf("Could not create default config: %v", err)
 		} else {
@@ -87,17 +92,18 @@ func createDefaultConfig(home string) {
 }
 
 func ensureDataFileExists() {
-	dir := filepath.Dir(dataFile)
+	path := viper.GetString("datafile")
+	dir := filepath.Dir(path)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Fatalf("Failed to create directory %s: %v", dir, err)
 		}
 	}
 
-	if _, err := os.Stat(dataFile); os.IsNotExist(err) {
-		if err := os.WriteFile(dataFile, []byte("[]"), 0644); err != nil {
-			log.Fatalf("Failed to create data file %s: %v", dataFile, err)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if err := os.WriteFile(path, []byte("[]"), 0644); err != nil {
+			log.Fatalf("Failed to create data file %s: %v", path, err)
 		}
-		fmt.Printf("Created data file: %s\n", dataFile)
+		fmt.Printf("Created data file: %s\n", path)
 	}
 }

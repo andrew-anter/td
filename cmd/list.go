@@ -19,45 +19,36 @@ var (
 	allOpt  bool
 )
 
-// listCmd represents the list command
 var listCmd = &cobra.Command{
-	Use:     "list",
-	Aliases: []string{"ls"},
-	Short:   "List items in todo.",
-	Long:    `listing the todo items in the datafile.`,
-	Run:     listRun,
+	Use:           "list",
+	Aliases:       []string{"ls"},
+	Short:         "List items in todo.",
+	Long:          `listing the todo items in the datafile.`,
+	RunE:          listRun,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
-func listRun(cmd *cobra.Command, args []string) {
+func listRun(cmd *cobra.Command, args []string) error {
 	items, err := task.ReadItems(viper.GetString("datafile"))
 	if err != nil {
-		fmt.Printf("%v", err)
-		return
+		return fmt.Errorf("failed to read items: %w", err)
 	}
 
-	sort.Sort(task.ByPri(items))
+	sort.Stable(task.ByPri(items))
 	w := tabwriter.NewWriter(os.Stdout, 3, 0, 1, ' ', 0)
-	for _, i := range items {
+	for idx, i := range items {
 		if allOpt || i.Done == doneOpt {
-			fmt.Fprintln(w, i.Label()+"\t"+i.PrettyDone()+"\t"+i.PrettyP()+"\t"+i.Text+"\t")
+			fmt.Fprintf(w, "%d.\t%s\t%s\t%s\n", idx+1, i.PrettyDone(), i.PrettyP(), i.Text)
 		}
 	}
 
 	w.Flush()
+	return nil
 }
 
 func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().BoolVarP(&allOpt, "all", "a", false, "Show All Todos")
 	listCmd.Flags().BoolVarP(&doneOpt, "done", "d", false, "Show 'Done' Todos")
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// listCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// listCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
