@@ -16,7 +16,7 @@ var completedCmd = &cobra.Command{
 }
 
 func completedRun(cmd *cobra.Command, args []string) error {
-	return runList(false, true)
+	return runList(listOptions{ShowCompleted: true})
 }
 
 func init() {

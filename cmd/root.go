@@ -26,7 +26,7 @@ var rootCmd = &cobra.Command{
 }
 
 func rootRun(cmd *cobra.Command, args []string) error {
-	return runList(false, false)
+	return runList(listOptions{})
 }
 
 func Execute() {

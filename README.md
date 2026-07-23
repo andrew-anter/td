@@ -60,9 +60,30 @@ td delete --completed  # remove every completed task
 | `-p, --priority N`    | `add`      | `2`                       | Priority `1` (high), `2`, `3` (low). |
 | `-a, --all`           | `list`     | `false`                   | Show complete and pending items. |
 | `-d, --completed`     | `list`     | `false`                   | Show only completed items. |
+| `--json`              | `list`     | `false`                   | Emit items as a JSON array (display order, with 1-based `Index`). |
+| `--count`             | `list`     | `false`                   | Emit `{"pending","completed","total"}` as JSON. Ignores filter flags. |
 | `--completed`         | `delete`   | `false`                   | Delete every completed task (instead of a single item). |
 | `-f, --datafile <path>` | global    | `$HOME/.tasks.json`       | Where tasks are stored.    |
 | `-c, --config <path>`  | global    | `$HOME/.todo.yaml`        | Path to the config file.   |
+
+### JSON output
+
+`td list --json` is useful for scripts and status bars (e.g. waybar). The
+array mirrors the data-file shape plus a 1-based `Index` matching the
+human list:
+
+```sh
+$ td list --json
+[{"Index":1,"Text":"write report","Priority":1,"Done":false},
+ {"Index":2,"Text":"buy milk","Priority":2,"Done":false}]
+```
+
+`td list --count` returns a single line:
+
+```sh
+$ td list --count
+{"pending":2,"completed":0,"total":2}
+```
 
 ## Configuration
 
