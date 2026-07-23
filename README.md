@@ -32,29 +32,31 @@ This builds the binary and installs it, plus generated shell completions, to:
 ## Usage
 
 ```sh
+td                      # show pending work (what you should be doing)
 td add "buy milk"
 td add "write report" --priority 1
-td list                 # alias: ls
-td list --done          # only finished items
-td list --all           # everything, done or not
-td done 1               # alias: do; mark item #1 as done
+td list                 # alias: ls; show pending items
+td list --all           # everything, complete or not
+td completed            # show only completed items
+td complete 1           # aliases: c, comp; mark item #1 as complete
 ```
 
 ### Commands
 
-| Command       | Aliases | Description                              |
-| ------------- | ------- | ---------------------------------------- |
-| `add <text>…` | —       | Append one or more items to the list.    |
-| `list`        | `ls`    | Print items, sorted by priority.         |
-| `done <n>`    | `do`    | Mark the nth item (as shown by `list`) as done. |
+| Command         | Aliases      | Description                                       |
+| --------------- | ------------ | ------------------------------------------------- |
+| `add <text>…`   | —            | Append one or more items to the list.             |
+| `list`          | `ls`         | Print items, sorted by priority.                  |
+| `completed`     | —            | Print only completed items.                       |
+| `complete <n>`  | `c`, `comp`  | Mark the nth item (as shown by `list`) as complete. |
 
 ### Flags
 
 | Flag                  | Applies to | Default                   | Description                |
 | --------------------- | ---------- | ------------------------- | -------------------------- |
 | `-p, --priority N`    | `add`      | `2`                       | Priority `1` (high), `2`, `3` (low). |
-| `-a, --all`           | `list`     | `false`                   | Show done and pending items. |
-| `-d, --done`          | `list`     | `false`                   | Show only completed items. |
+| `-a, --all`           | `list`     | `false`                   | Show complete and pending items. |
+| `-d, --completed`     | `list`     | `false`                   | Show only completed items. |
 | `--datafile <path>`   | global     | `$HOME/.tasks.json`       | Where tasks are stored.    |
 | `--config <path>`     | global     | `$HOME/.todo.yaml`        | Path to the config file.   |
 
@@ -96,7 +98,8 @@ cmd/                 # cobra commands
   root.go            # root command, config bootstrap, data-file bootstrap
   add.go             # `add` command
   list.go            # `list` / `ls` command
-  done.go            # `done` / `do` command
+  complete.go        # `complete` / `c` / `comp` command
+  completed.go       # `completed` command
 task/                # domain types and persistence
   task.go            # Item, sort order, SaveItems, ReadItems
   task_test.go       # unit tests

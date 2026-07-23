@@ -17,8 +17,16 @@ import (
 var cfgFile string
 
 var rootCmd = &cobra.Command{
-	Use:   "todo",
-	Short: "todo application to help me work on my goals.",
+	Use:           "todo",
+	Short:         "todo application to help me work on my goals.",
+	Long:          "With no arguments, prints pending todos (what you should be working on).",
+	RunE:          rootRun,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+}
+
+func rootRun(cmd *cobra.Command, args []string) error {
+	return runList(false, false)
 }
 
 func Execute() {

@@ -13,18 +13,18 @@ import (
 	"github.com/spf13/viper"
 )
 
-var doneCmd = &cobra.Command{
-	Use:           "done",
-	Aliases:       []string{"do"},
-	Short:         "Mark Item as Done",
-	RunE:          doneRun,
+var completeCmd = &cobra.Command{
+	Use:           "complete",
+	Aliases:       []string{"c", "comp"},
+	Short:         "Mark Item as Complete",
+	RunE:          completeRun,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
 
-func doneRun(cmd *cobra.Command, args []string) error {
+func completeRun(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("done requires an item number")
+		return fmt.Errorf("complete requires an item number")
 	}
 
 	i, err := strconv.Atoi(args[0])
@@ -57,10 +57,10 @@ func doneRun(cmd *cobra.Command, args []string) error {
 	if err := task.SaveItems(viper.GetString("datafile"), items); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)
 	}
-	fmt.Printf("%q %s\n", items[target].Text, "marked done")
+	fmt.Printf("%q %s\n", items[target].Text, "marked complete")
 	return nil
 }
 
 func init() {
-	rootCmd.AddCommand(doneCmd)
+	rootCmd.AddCommand(completeCmd)
 }

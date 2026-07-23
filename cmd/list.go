@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	doneOpt bool
-	allOpt  bool
+	completedOpt bool
+	allOpt       bool
 )
 
 var listCmd = &cobra.Command{
@@ -30,6 +30,10 @@ var listCmd = &cobra.Command{
 }
 
 func listRun(cmd *cobra.Command, args []string) error {
+	return runList(allOpt, completedOpt)
+}
+
+func runList(showAll, showCompleted bool) error {
 	items, err := task.ReadItems(viper.GetString("datafile"))
 	if err != nil {
 		return fmt.Errorf("failed to read items: %w", err)
@@ -38,7 +42,7 @@ func listRun(cmd *cobra.Command, args []string) error {
 	sort.Stable(task.ByPri(items))
 	w := tabwriter.NewWriter(os.Stdout, 3, 0, 1, ' ', 0)
 	for idx, i := range items {
-		if allOpt || i.Done == doneOpt {
+		if showAll || i.Done == showCompleted {
 			fmt.Fprintf(w, "%d.\t%s\t%s\t%s\n", idx+1, i.PrettyDone(), i.PrettyP(), i.Text)
 		}
 	}
@@ -50,5 +54,5 @@ func listRun(cmd *cobra.Command, args []string) error {
 func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().BoolVarP(&allOpt, "all", "a", false, "Show All Todos")
-	listCmd.Flags().BoolVarP(&doneOpt, "done", "d", false, "Show 'Done' Todos")
+	listCmd.Flags().BoolVarP(&completedOpt, "completed", "d", false, "Show 'Completed' Todos")
 }
