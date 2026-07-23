@@ -5,7 +5,6 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"todo/task"
 
@@ -44,14 +43,7 @@ func completeRun(cmd *cobra.Command, args []string) error {
 	// Find the original index of the i-th item as it would appear in
 	// a sorted list, without mutating the loaded slice. Saving in
 	// original order keeps indices stable across runs.
-	order := make([]int, len(items))
-	for k := range order {
-		order[k] = k
-	}
-	sort.SliceStable(order, func(a, b int) bool {
-		return task.ByPri(items).Less(order[a], order[b])
-	})
-	target := order[i-1]
+	target := sortedOrderIndices(items)[i-1]
 	items[target].Done = true
 
 	if err := task.SaveItems(viper.GetString("datafile"), items); err != nil {

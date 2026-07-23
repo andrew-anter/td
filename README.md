@@ -39,6 +39,8 @@ td list                 # alias: ls; show pending items
 td list --all           # everything, complete or not
 td completed            # show only completed items
 td complete 1           # aliases: c, comp; mark item #1 as complete
+td delete 1            # aliases: rm, del; remove item #1
+td delete --completed  # remove every completed task
 ```
 
 ### Commands
@@ -49,6 +51,7 @@ td complete 1           # aliases: c, comp; mark item #1 as complete
 | `list`          | `ls`         | Print items, sorted by priority.                  |
 | `completed`     | —            | Print only completed items.                       |
 | `complete <n>`  | `c`, `comp`  | Mark the nth item (as shown by `list`) as complete. |
+| `delete <n>`    | `rm`, `del`  | Delete the nth item, or `--completed` to remove all completed tasks. |
 
 ### Flags
 
@@ -57,6 +60,7 @@ td complete 1           # aliases: c, comp; mark item #1 as complete
 | `-p, --priority N`    | `add`      | `2`                       | Priority `1` (high), `2`, `3` (low). |
 | `-a, --all`           | `list`     | `false`                   | Show complete and pending items. |
 | `-d, --completed`     | `list`     | `false`                   | Show only completed items. |
+| `--completed`         | `delete`   | `false`                   | Delete every completed task (instead of a single item). |
 | `--datafile <path>`   | global     | `$HOME/.tasks.json`       | Where tasks are stored.    |
 | `--config <path>`     | global     | `$HOME/.todo.yaml`        | Path to the config file.   |
 
@@ -100,6 +104,7 @@ cmd/                 # cobra commands
   list.go            # `list` / `ls` command
   complete.go        # `complete` / `c` / `comp` command
   completed.go       # `completed` command
+  delete.go          # `delete` / `rm` / `del` command
 task/                # domain types and persistence
   task.go            # Item, sort order, SaveItems, ReadItems
   task_test.go       # unit tests

@@ -51,6 +51,21 @@ func runList(showAll, showCompleted bool) error {
 	return nil
 }
 
+// sortedOrderIndices returns the original indices of items in the order
+// produced by task.ByPri (undone first, then ascending priority, stable).
+// The result has length len(items); result[0] is the index of the item
+// that would appear first in `td list`.
+func sortedOrderIndices(items []task.Item) []int {
+	order := make([]int, len(items))
+	for k := range order {
+		order[k] = k
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		return task.ByPri(items).Less(order[a], order[b])
+	})
+	return order
+}
+
 func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().BoolVarP(&allOpt, "all", "a", false, "Show All Todos")
