@@ -12,6 +12,23 @@ go build -o td .
 
 The resulting binary is `td` (the project also runs as `go run .`).
 
+## Install
+
+```sh
+make install
+```
+
+This builds the binary and installs it, plus generated shell completions, to:
+
+- binary: `~/.local/bin/td`
+- bash:   `~/.local/share/bash-completion/completions/td`
+- zsh:    `~/.local/share/zsh/site-functions/_td` (ensure that directory is in
+  your `$fpath` before `compinit`, e.g.
+  `fpath=(~/.local/share/zsh/site-functions $fpath)` in your `.zshrc`)
+- fish:   `~/.local/share/fish/vendor_completions.d/td.fish`
+
+`make uninstall` removes all of the above.
+
 ## Usage
 
 ```sh
