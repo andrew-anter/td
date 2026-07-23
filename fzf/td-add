@@ -1,0 +1,7 @@
+#!/bin/sh
+# td-add — prompt for a new task via gum and add it.
+text=$(gum input --placeholder "New task" --prompt="td add ❯ ")
+if [ -n "$text" ]; then
+    td add "$text"
+    notify-send "td" "Added: $text" -t 2000
+fi

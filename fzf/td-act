@@ -1,0 +1,52 @@
+#!/bin/sh
+# td-act <action> <num> <display_text> <done_flag>
+# Run the named td action and post a desktop notification.
+#
+# The display_text field from fzf may carry a "[x] " / "[ ] " prefix
+# we add in td-fzf; strip it so the notification reads cleanly.
+#
+# Actions: complete | reopen | toggle | delete
+#   toggle  -> complete if pending, reopen if done
+#   complete, reopen are quiet no-ops when the item is already in
+#   the requested state.
+
+action=$1
+num=$2
+text=$(printf '%s' "$3" | sed 's/^\[[ x]\] //')
+done_flag=$4
+
+case "$action" in
+    complete)
+        if [ "$done_flag" = "true" ]; then
+            notify-send "td" "Already complete: $text" -t 2000
+        else
+            td complete "$num"
+            notify-send "td" "Completed: $text" -t 2000
+        fi
+        ;;
+    reopen)
+        if [ "$done_flag" = "false" ]; then
+            notify-send "td" "Already pending: $text" -t 2000
+        else
+            td reopen "$num"
+            notify-send "td" "Reopened: $text" -t 2000
+        fi
+        ;;
+    toggle)
+        if [ "$done_flag" = "true" ]; then
+            td reopen "$num"
+            notify-send "td" "Reopened: $text" -t 2000
+        else
+            td complete "$num"
+            notify-send "td" "Completed: $text" -t 2000
+        fi
+        ;;
+    delete)
+        td delete "$num"
+        notify-send "td" "Deleted: $text" -t 2000
+        ;;
+    *)
+        echo "unknown action: $action" >&2
+        exit 2
+        ;;
+esac

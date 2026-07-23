@@ -117,6 +117,23 @@ Tasks are stored as a JSON array of objects:
 Writes are atomic: the new contents go to a sibling `*.tmp-*` file and are
 renamed into place, so a crash mid-write cannot corrupt the list.
 
+## fzf / waybar integration
+
+A small set of shell scripts in `fzf/` turns `td` into a clickable
+waybar module backed by an interactive fzf picker. The waybar module
+shows the pending count and opens a fuzzy picker on click (enter to
+toggle, ctrl-d to delete, ctrl-a to add, ctrl-t to cycle view).
+
+Install the scripts:
+
+```sh
+make fzf-integration
+```
+
+This copies the scripts to `~/.local/bin/`. `make install` runs it
+automatically. See [`fzf/README.md`](fzf/README.md) for the waybar
+config snippets and full usage.
+
 ## Project Layout
 
 ```
@@ -126,11 +143,20 @@ cmd/                 # cobra commands
   add.go             # `add` command
   list.go            # `list` / `ls` command
   complete.go        # `complete` / `c` / `comp` command
+  reopen.go          # `reopen` / `uncomplete` command
   completed.go       # `completed` command
   delete.go          # `delete` / `rm` / `del` command
 task/                # domain types and persistence
   task.go            # Item, sort order, SaveItems, ReadItems
   task_test.go       # unit tests
+fzf/                 # fzf / waybar integration (see fzf/README.md)
+  td-waybar          # waybar exec — emits count + tooltip as JSON
+  td-fzf             # main fzf picker
+  td-render          # render the list for a view
+  td-reload          # re-render after an action
+  td-cycle-view      # bump the current view in the state file
+  td-act             # run an action + notify
+  td-add             # gum prompt for adding a new task
 ```
 
 ## Tests

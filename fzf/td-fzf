@@ -1,0 +1,58 @@
+#!/bin/sh
+# td-fzf — interactive `td` manager using fzf.
+#
+# fzf stays open across every action. Each key runs the action
+# asynchronously via execute() and then reloads the list, so the
+# picker always reflects the latest state.
+#
+# Keys:
+#   enter    -> toggle state (complete <-> reopen)
+#   ctrl-d   -> delete
+#   ctrl-a   -> add new (gum prompt)
+#   ctrl-t   -> cycle view: pending -> all -> completed -> pending
+#   esc      -> close
+#
+# State: the current view is stashed in $TD_FZF_STATE so td-reload
+# can re-render the right view after an action.
+
+VIEW=${1:-pending}
+
+# Render the initial list. Fall back to "all" if the pending view is
+# empty so the user can still see and clean up completed tasks.
+items=$(td-render "$VIEW")
+if [ -z "$items" ] && [ "$VIEW" = "pending" ]; then
+    VIEW=all
+    items=$(td-render all)
+fi
+
+if [ -z "$items" ]; then
+    notify-send "td" "No tasks" -t 2000
+    exit 0
+fi
+
+# Cycle order for ctrl-t.
+case "$VIEW" in
+    pending)   next=all ;;
+    all)       next=completed ;;
+    completed) next=pending ;;
+esac
+
+# Each fzf session gets its own state file so concurrent sessions
+# (unlikely, but possible) don't stomp each other.
+export TD_FZF_STATE=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/td-fzf-view.XXXXXX")
+trap 'rm -f "$TD_FZF_STATE"' EXIT INT TERM
+printf '%s' "$VIEW" > "$TD_FZF_STATE"
+
+printf '%s\n' "$items" | fzf \
+    --height=40% \
+    --reverse \
+    --prompt="td [$VIEW] ❯ " \
+    --header='enter: toggle · ctrl-d: delete · ctrl-a: add · ctrl-t: cycle view' \
+    --delimiter=$'\t' \
+    --with-nth=2 \
+    --preview='printf "  %s\n" {2}' \
+    --preview-window='up:1:wrap' \
+    --bind "enter:execute(td-act toggle {1} {2} {3})+reload(td-reload)" \
+    --bind "ctrl-d:execute(td-act delete {1} {2} {3})+reload(td-reload)" \
+    --bind "ctrl-a:execute(td-add)+reload(td-reload)" \
+    --bind "ctrl-t:execute(td-cycle-view $next)+reload(td-reload)"

@@ -1,0 +1,8 @@
+#!/bin/sh
+# td-reload — re-render the list for the current view, which is
+# stashed in $TD_FZF_STATE by td-fzf. Used by fzf's `reload` action
+# after every execute() so the picker reflects the new state.
+
+view=$(cat "${TD_FZF_STATE:-/tmp/td-fzf-view}" 2>/dev/null)
+[ -z "$view" ] && view=pending
+td-render "$view"

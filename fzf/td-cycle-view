@@ -1,0 +1,4 @@
+#!/bin/sh
+# td-cycle-view <next_view>
+# Stash the new view so the next td-reload picks it up.
+printf '%s' "$1" > "${TD_FZF_STATE:-/tmp/td-fzf-view}"

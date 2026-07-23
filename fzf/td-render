@@ -1,0 +1,21 @@
+#!/bin/sh
+# td-render <view>
+# Emit the todo list for the given view in the fzf input format:
+#   Index<TAB>[x| ] Text<TAB>DoneFlag
+#
+# Views: pending (default), all, completed.
+# Called by td-fzf (initial load) and td-reload (after an action).
+
+view=${1:-pending}
+case "$view" in
+    pending)   flag=""            ;;
+    all)       flag="--all"       ;;
+    completed) flag="--completed" ;;
+    *)
+        echo "unknown view: $view" >&2
+        exit 2
+        ;;
+esac
+
+td list --json $flag 2>/dev/null | jq -r '
+    .[] | "\(.Index)\t\((if .Done then "[x] " else "[ ] " end) + .Text)\t\(.Done)"'
