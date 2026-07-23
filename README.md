@@ -39,19 +39,21 @@ td list                 # alias: ls; show pending items
 td list --all           # everything, complete or not
 td completed            # show only completed items
 td complete 1           # aliases: c, comp; mark item #1 as complete
+td reopen 1             # aliases: uncomplete; mark item #1 as not complete
 td delete 1            # aliases: rm, del; remove item #1
 td delete --completed  # remove every completed task
 ```
 
 ### Commands
 
-| Command         | Aliases      | Description                                       |
-| --------------- | ------------ | ------------------------------------------------- |
-| `add <text>…`   | —            | Append one or more items to the list.             |
-| `list`          | `ls`         | Print items, sorted by priority.                  |
-| `completed`     | —            | Print only completed items.                       |
-| `complete <n>`  | `c`, `comp`  | Mark the nth item (as shown by `list`) as complete. |
-| `delete <n>`    | `rm`, `del`  | Delete the nth item, or `--completed` to remove all completed tasks. |
+| Command         | Aliases            | Description                                       |
+| --------------- | ------------------ | ------------------------------------------------- |
+| `add <text>…`   | —                  | Append one or more items to the list.             |
+| `list`          | `ls`               | Print items, sorted by priority.                  |
+| `completed`     | —                  | Print only completed items.                       |
+| `complete <n>`  | `c`, `comp`        | Mark the nth item (as shown by `list`) as complete. |
+| `reopen <n>`    | `uncomplete`       | Mark the nth item as not complete (no-op if already pending). |
+| `delete <n>`    | `rm`, `del`        | Delete the nth item, or `--completed` to remove all completed tasks. |
 
 ### Flags
 
