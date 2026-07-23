@@ -83,8 +83,8 @@ func init() {
 	}
 	defaultDataPath := filepath.Join(home, ".tasks.json")
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.todo.yaml)")
-	rootCmd.PersistentFlags().String("datafile", defaultDataPath, "data file to store tasks.")
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default is $HOME/.todo.yaml)")
+	rootCmd.PersistentFlags().StringP("datafile", "f", defaultDataPath, "data file to store tasks.")
 }
 
 func createDefaultConfig(home string) {

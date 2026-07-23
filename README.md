@@ -61,8 +61,8 @@ td delete --completed  # remove every completed task
 | `-a, --all`           | `list`     | `false`                   | Show complete and pending items. |
 | `-d, --completed`     | `list`     | `false`                   | Show only completed items. |
 | `--completed`         | `delete`   | `false`                   | Delete every completed task (instead of a single item). |
-| `--datafile <path>`   | global     | `$HOME/.tasks.json`       | Where tasks are stored.    |
-| `--config <path>`     | global     | `$HOME/.todo.yaml`        | Path to the config file.   |
+| `-f, --datafile <path>` | global    | `$HOME/.tasks.json`       | Where tasks are stored.    |
+| `-c, --config <path>`  | global    | `$HOME/.todo.yaml`        | Path to the config file.   |
 
 ## Configuration
 
