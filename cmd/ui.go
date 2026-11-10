@@ -365,17 +365,9 @@ func (m uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		overhead := 4
-		if m.help.ShowAll {
-			overhead = 9
-		}
-		h := msg.Height - overhead
-		if h < 1 {
-			h = 1
-		}
-		m.list.SetSize(msg.Width, h)
 		m.help.SetWidth(msg.Width)
 		m.input.SetWidth(msg.Width - 6)
+		m.resizeList()
 		return m, nil
 
 	case tea.BackgroundColorMsg:
@@ -415,6 +407,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.mode = modeNormal
+				m.resizeList()
 				return m, nil
 			default:
 				if text != "" && m.mode == modeAdd {
@@ -461,6 +454,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.setProject(names[m.pickerIdx])
 			}
 			m.mode = modeNormal
+			m.resizeList()
 			m.refresh("")
 		case "n":
 			m.mode = modeNewProject
@@ -469,6 +463,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.input.Focus()
 		case "esc", "q":
 			m.mode = modeNormal
+			m.resizeList()
 		}
 		return m, nil
 	}
@@ -497,6 +492,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Help):
 		m.help.ShowAll = !m.help.ShowAll
+		m.resizeList()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Pick):
@@ -508,6 +504,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		m.resizeList()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Reload):
@@ -587,11 +584,34 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// pickerView renders the project overlay: one row per namespace with
+// resizeList fits the list into the space below header, picker panel
+// (when open), status/input line, and help.
+func (m *uiModel) resizeList() {
+	overhead := 4
+	if m.help.ShowAll {
+		overhead = 9
+	}
+	if m.mode == modePicker || m.mode == modeNewProject {
+		overhead += len(m.projectNames()) + 6
+	}
+	h := m.height - overhead
+	if h < 1 {
+		h = 1
+	}
+	m.list.SetSize(m.width, h)
+}
+
+// pickerView renders the project panel: one row per namespace with
 // its pending count, a cursor, and key hints.
 func (m uiModel) pickerView() string {
 	names := m.projectNames()
-	lines := make([]string, 0, len(names)+1)
+	nameW := 0
+	for _, n := range names {
+		if len(n) > nameW {
+			nameW = len(n)
+		}
+	}
+	rows := make([]string, 0, len(names))
 	for i, n := range names {
 		pending := 0
 		if p := m.store.Project(n); p != nil {
@@ -601,22 +621,25 @@ func (m uiModel) pickerView() string {
 				}
 			}
 		}
-		label := n
+		cursor := "  "
+		if i == m.pickerIdx {
+			cursor = "▸ "
+		}
+		padded := fmt.Sprintf("%-*s", nameW, n)
 		if n == m.project {
-			label += "  (current)"
+			padded = projectStyle().Render(padded)
 		}
-		cursor := "   "
-		if i == m.pickerIdx {
-			cursor = "▸  "
-		}
-		line := cursor + fmt.Sprintf("%s (%d pending)", label, pending)
-		if i == m.pickerIdx {
-			line = selectedStyle().Render(line)
-		}
-		lines = append(lines, line)
+		count := dimStyle().Render(fmt.Sprintf("%d pending", pending))
+		rows = append(rows, cursor+padded+"  "+count)
 	}
-	lines = append(lines, dimStyle().Render("   enter select · n new · esc close"))
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	hint := dimStyle().Render("enter select · n new · esc close")
+	panel := lipgloss.JoinVertical(lipgloss.Left, append(rows, hint)...)
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("244")).Render("PROJECTS")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(0, 1).
+		Render(lipgloss.JoinVertical(lipgloss.Left, title, panel))
 }
 
 func (m uiModel) View() tea.View {
@@ -664,12 +687,7 @@ func (m uiModel) View() tea.View {
 	chip := projectStyle().Render(fmt.Sprintf(" %s ", chipLabel))
 	header := lipgloss.JoinHorizontal(lipgloss.Left, append([]string{chip}, tabs...)...)
 
-	var body string
-	if m.mode == modePicker {
-		body = m.pickerView()
-	} else {
-		body = m.list.View()
-	}
+	body := m.list.View()
 
 	var inputLine string
 	switch m.mode {
@@ -691,7 +709,11 @@ func (m uiModel) View() tea.View {
 
 	footer := m.help.View(m.keys)
 
-	parts := []string{header, body}
+	parts := []string{header}
+	if m.mode == modePicker || m.mode == modeNewProject {
+		parts = append(parts, m.pickerView())
+	}
+	parts = append(parts, body)
 	if inputLine != "" {
 		parts = append(parts, inputLine)
 	}
