@@ -31,16 +31,20 @@ func editRun(cmd *cobra.Command, args []string) error {
 	}
 	defer unlock.Close()
 
-	items, err := task.ReadItems(path)
+	store, err := task.ReadStore(path)
 	if err != nil {
 		return fmt.Errorf("failed to read items: %w", err)
 	}
+	project, err := resolveProject(&store, true)
+	if err != nil {
+		return err
+	}
 
-	if err := editTaskTitle(items, args[0], args[1]); err != nil {
+	if err := editTaskTitle(project.Items, args[0], args[1]); err != nil {
 		return fmt.Errorf("failed to edit item: %w", err)
 	}
 
-	if err := task.SaveItems(path, items); err != nil {
+	if err := task.SaveStore(path, store); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)
 	}
 	return nil

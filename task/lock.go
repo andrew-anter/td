@@ -13,7 +13,7 @@ import (
 // filename, serializing read-modify-write cycles across concurrent td
 // processes. The returned Closer releases the lock. On platforms where
 // file locking is unsupported this still returns a valid (no-op)
-// closer; SaveItems' atomic rename keeps the data file uncorrupted even
+// closer; SaveStore's atomic rename keeps the data file uncorrupted even
 // then, at the cost of possible lost updates.
 func Lock(filename string) (io.Closer, error) {
 	lockPath := filepath.Join(filepath.Dir(filename), filepath.Base(filename)+".lock")

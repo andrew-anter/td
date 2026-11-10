@@ -4,11 +4,16 @@ Package Task Copyright © 2025 Andrew Anter <andrew.anter@gmail.com>
 package task
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 )
+
+// DefaultProject is the namespace used when no --project is given.
+// Legacy data files (a bare JSON array of items) migrate into it.
+const DefaultProject = "inbox"
 
 type Item struct {
 	Text     string
@@ -62,12 +67,87 @@ func (i *Item) PrettyDone() string {
 	return ""
 }
 
-func SaveItems(filename string, items []Item) error {
-	b, err := json.Marshal(items)
+// Project is a named namespace for items. Each project keeps its own
+// list and its own display numbering: item 3 of "work" has nothing to
+// do with item 3 of "home".
+type Project struct {
+	Name  string `json:"name"`
+	Items []Item `json:"items"`
+}
+
+// Store is the entire data file: an ordered set of projects.
+type Store struct {
+	Projects []Project `json:"projects"`
+}
+
+// Project returns the named project, or nil when absent.
+func (s *Store) Project(name string) *Project {
+	for k := range s.Projects {
+		if s.Projects[k].Name == name {
+			return &s.Projects[k]
+		}
+	}
+	return nil
+}
+
+// EnsureProject returns the named project, appending an empty one at
+// the end of the store when it does not exist yet.
+func (s *Store) EnsureProject(name string) *Project {
+	if p := s.Project(name); p != nil {
+		return p
+	}
+	s.Projects = append(s.Projects, Project{Name: name})
+	return &s.Projects[len(s.Projects)-1]
+}
+
+// RemoveProject deletes the named project and reports whether it
+// existed.
+func (s *Store) RemoveProject(name string) bool {
+	for k := range s.Projects {
+		if s.Projects[k].Name == name {
+			s.Projects = append(s.Projects[:k], s.Projects[k+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// ProjectNames returns the project names in store order.
+func (s *Store) ProjectNames() []string {
+	names := make([]string, len(s.Projects))
+	for k, p := range s.Projects {
+		names[k] = p.Name
+	}
+	return names
+}
+
+// ValidateProjectName rejects empty names and names containing
+// whitespace or control characters, so a project stays usable as a
+// single unquoted CLI argument.
+func ValidateProjectName(name string) error {
+	if name == "" {
+		return fmt.Errorf("project name must not be empty")
+	}
+	for _, r := range name {
+		if r <= ' ' {
+			return fmt.Errorf("project name %q must not contain whitespace", name)
+		}
+	}
+	return nil
+}
+
+// SaveStore writes the store as JSON, atomically: the payload lands in
+// a temp file beside the target which is then renamed over it, so a
+// crash mid-write never truncates the real data file.
+func SaveStore(filename string, s Store) error {
+	b, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
+	return writeFileAtomic(filename, b)
+}
 
+func writeFileAtomic(filename string, b []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(filename), filepath.Base(filename)+".tmp-*")
 	if err != nil {
 		return err
@@ -103,16 +183,36 @@ func SaveItems(filename string, items []Item) error {
 	return nil
 }
 
-func ReadItems(filename string) ([]Item, error) {
+// ReadStore loads the data file. A legacy file — a bare JSON array of
+// items, the format that predates projects — migrates transparently:
+// its items become the contents of DefaultProject. The upgrade is
+// written back on the next save; reading never mutates the file.
+func ReadStore(filename string) (Store, error) {
 	b, err := os.ReadFile(filename)
 	if err != nil {
-		return []Item{}, err
+		return Store{}, err
 	}
 
-	var items []Item
-	if err := json.Unmarshal(b, &items); err != nil {
-		return []Item{}, err
+	trimmed := bytes.TrimSpace(b)
+	if len(trimmed) == 0 {
+		return Store{}, nil
 	}
 
-	return items, nil
+	if trimmed[0] == '[' {
+		var items []Item
+		if err := json.Unmarshal(trimmed, &items); err != nil {
+			return Store{}, err
+		}
+		s := Store{}
+		if len(items) > 0 {
+			s.Projects = []Project{{Name: DefaultProject, Items: items}}
+		}
+		return s, nil
+	}
+
+	var s Store
+	if err := json.Unmarshal(trimmed, &s); err != nil {
+		return Store{}, err
+	}
+	return s, nil
 }

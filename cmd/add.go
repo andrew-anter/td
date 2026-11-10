@@ -38,19 +38,23 @@ func addRun(cmd *cobra.Command, args []string) error {
 	}
 	defer unlock.Close()
 
-	items, err := task.ReadItems(path)
+	store, err := task.ReadStore(path)
 	if err != nil {
 		return fmt.Errorf("failed to read items: %w", err)
+	}
+	project, err := resolveProject(&store, true)
+	if err != nil {
+		return err
 	}
 	for _, x := range args {
 		item := task.Item{Text: x}
 		if err := item.SetPriority(priority); err != nil {
 			return err
 		}
-		items = append(items, item)
+		project.Items = append(project.Items, item)
 	}
 
-	if err := task.SaveItems(path, items); err != nil {
+	if err := task.SaveStore(path, store); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)
 	}
 	return nil

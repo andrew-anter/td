@@ -34,10 +34,15 @@ func deleteRun(cmd *cobra.Command, args []string) error {
 	}
 	defer unlock.Close()
 
-	items, err := task.ReadItems(path)
+	store, err := task.ReadStore(path)
 	if err != nil {
 		return fmt.Errorf("failed to read items: %w", err)
 	}
+	project, err := resolveProject(&store, true)
+	if err != nil {
+		return err
+	}
+	items := project.Items
 
 	if deleteCompletedOpt {
 		if len(args) > 0 {
@@ -56,8 +61,9 @@ func deleteRun(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to delete item: %w", err)
 		}
 	}
+	project.Items = items
 
-	if err := task.SaveItems(path, items); err != nil {
+	if err := task.SaveStore(path, store); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)
 	}
 

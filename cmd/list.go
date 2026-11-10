@@ -24,10 +24,11 @@ var (
 
 // listOptions controls runList's filtering and output mode.
 type listOptions struct {
-	ShowAll       bool // include everything (pending + completed)
-	ShowCompleted bool // include only completed items
-	AsJSON        bool // emit items as a JSON array
-	AsCount       bool // emit {"pending","completed","total"} as JSON
+	ShowAll       bool   // include everything (pending + completed)
+	ShowCompleted bool   // include only completed items
+	AsJSON        bool   // emit items as a JSON array
+	AsCount       bool   // emit {"pending","completed","total"} as JSON
+	Project       string // namespace to list; "" = default project
 }
 
 var listCmd = &cobra.Command{
@@ -46,8 +47,12 @@ Item numbers are positions in the full sorted list and are identical
 across views and with --json, so a number shown in any view can be
 passed directly to complete, delete, edit, or reopen.
 
+Scope: items live inside projects (--project/-P, default "inbox");
+listing always shows exactly one project's items with that project's
+own numbering.
+
 Filters (default, --all, --completed) apply to both the human and --json
-output. --count always reports totals across the whole data file.`,
+output. --count ignores project and filter: totals across all projects.`,
 	RunE:          listRun,
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -59,31 +64,48 @@ func listRun(cmd *cobra.Command, args []string) error {
 		ShowCompleted: completedOpt,
 		AsJSON:        jsonOpt,
 		AsCount:       countOpt,
+		Project:       projectName(),
 	})
 }
 
 func runList(opts listOptions) error {
-	items, err := task.ReadItems(viper.GetString("datafile"))
+	store, err := task.ReadStore(viper.GetString("datafile"))
 	if err != nil {
 		return fmt.Errorf("failed to read items: %w", err)
 	}
 
-	// --count is independent of sort/filter: report totals across all items.
+	// --count is independent of sort/filter/project: it reports totals
+	// across every project, which is what status bars want.
 	if opts.AsCount {
 		var pending, done int
-		for _, i := range items {
-			if i.Done {
-				done++
-			} else {
-				pending++
+		for _, p := range store.Projects {
+			for _, i := range p.Items {
+				if i.Done {
+					done++
+				} else {
+					pending++
+				}
 			}
 		}
 		return json.NewEncoder(os.Stdout).Encode(struct {
 			Pending   int `json:"pending"`
 			Completed int `json:"completed"`
 			Total     int `json:"total"`
-		}{Pending: pending, Completed: done, Total: len(items)})
+		}{Pending: pending, Completed: done, Total: pending + done})
 	}
+
+	name := opts.Project
+	if name == "" {
+		name = task.DefaultProject
+	}
+	project := store.Project(name)
+	if project == nil {
+		if name != task.DefaultProject {
+			return fmt.Errorf("no such project %q (create it: td project create %s)", name, name)
+		}
+		project = &task.Project{Name: name}
+	}
+	items := project.Items
 
 	sort.Stable(task.ByPri(items))
 

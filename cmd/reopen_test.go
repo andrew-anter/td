@@ -15,8 +15,12 @@ func writeItems(t *testing.T, items []task.Item) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tasks.json")
-	if err := task.SaveItems(path, items); err != nil {
-		t.Fatalf("SaveItems: %v", err)
+	store := task.Store{}
+	if len(items) > 0 {
+		store.Projects = []task.Project{{Name: task.DefaultProject, Items: items}}
+	}
+	if err := task.SaveStore(path, store); err != nil {
+		t.Fatalf("SaveStore: %v", err)
 	}
 	viper.Set("datafile", path)
 }
@@ -30,10 +34,7 @@ func TestReopenPendingItem_NoOp(t *testing.T) {
 		t.Fatalf("reopenRun: %v", err)
 	}
 
-	got, err := task.ReadItems(viper.GetString("datafile"))
-	if err != nil {
-		t.Fatalf("ReadItems: %v", err)
-	}
+	got := readSaved(t)
 	if got[0].Done {
 		t.Errorf("pending item marked done after reopen")
 	}
@@ -52,10 +53,7 @@ func TestReopenDoneItem_MarksPending(t *testing.T) {
 		t.Fatalf("reopenRun: %v", err)
 	}
 
-	got, err := task.ReadItems(viper.GetString("datafile"))
-	if err != nil {
-		t.Fatalf("ReadItems: %v", err)
-	}
+	got := readSaved(t)
 	if got[0].Done {
 		t.Errorf("item #0 (buy milk) should remain pending")
 	}

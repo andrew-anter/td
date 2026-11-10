@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mitchellh/go-homedir"
@@ -18,6 +19,7 @@ import (
 )
 
 var cfgFile string
+var projectOpt string
 
 var rootCmd = &cobra.Command{
 	Use:           "td",
@@ -33,18 +35,28 @@ var rootCmd = &cobra.Command{
 // printing the pending list, so `td | something` keeps working.
 func rootRun(cmd *cobra.Command, args []string) error {
 	if !isTerminal(os.Stdout) {
-		return runList(listOptions{})
+		return runList(listOptions{Project: projectName()})
 	}
 
 	path := viper.GetString("datafile")
-	items, err := task.ReadItems(path)
+	store, err := task.ReadStore(path)
 	if err != nil {
 		return fmt.Errorf("failed to read items: %w", err)
 	}
 
-	p := tea.NewProgram(newUIModel(path, items))
+	p := tea.NewProgram(newUIModel(path, store, projectName()))
 	_, err = p.Run()
 	return err
+}
+
+// projectName returns the namespace the current command operates on:
+// --project (or the "project" config key) when set, else the default
+// project.
+func projectName() string {
+	if n := strings.TrimSpace(viper.GetString("project")); n != "" {
+		return n
+	}
+	return task.DefaultProject
 }
 
 func isTerminal(f *os.File) bool {
@@ -83,6 +95,10 @@ func initConfig() {
 	if err := viper.BindPFlag("datafile", rootCmd.PersistentFlags().Lookup("datafile")); err != nil {
 		log.Printf("could not bind datafile flag: %v", err)
 	}
+	// Bind --project so a default namespace can live in the config file.
+	if err := viper.BindPFlag("project", rootCmd.PersistentFlags().Lookup("project")); err != nil {
+		log.Printf("could not bind project flag: %v", err)
+	}
 
 	// Set a default in Viper so it can be written to the config file later
 	defaultDataPath := filepath.Join(home, ".tasks.json")
@@ -111,6 +127,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default is $HOME/.todo.yaml)")
 	rootCmd.PersistentFlags().StringP("datafile", "f", defaultDataPath, "data file to store tasks.")
+	rootCmd.PersistentFlags().StringVarP(&projectOpt, "project", "P", "", fmt.Sprintf("project namespace to operate on (default: %q)", task.DefaultProject))
 }
 
 func createDefaultConfig(home string) {
@@ -135,7 +152,7 @@ func ensureDataFileExists() {
 	}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := os.WriteFile(path, []byte("[]"), 0644); err != nil {
+		if err := os.WriteFile(path, []byte(`{"projects":[]}`), 0644); err != nil {
 			log.Fatalf("Failed to create data file %s: %v", path, err)
 		}
 		fmt.Printf("Created data file: %s\n", path)

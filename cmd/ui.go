@@ -140,19 +140,21 @@ const (
 )
 
 type uiKeys struct {
-	Quit     key.Binding
-	Toggle   key.Binding
-	Add      key.Binding
-	Edit     key.Binding
-	Delete   key.Binding
-	Pri1     key.Binding
-	Pri2     key.Binding
-	Pri3     key.Binding
-	Cycle    key.Binding
-	CycleRev key.Binding
-	Reload   key.Binding
-	Filter   key.Binding
-	Help     key.Binding
+	Quit        key.Binding
+	Toggle      key.Binding
+	Add         key.Binding
+	Edit        key.Binding
+	Delete      key.Binding
+	Pri1        key.Binding
+	Pri2        key.Binding
+	Pri3        key.Binding
+	PrevProject key.Binding
+	NextProject key.Binding
+	Cycle       key.Binding
+	CycleRev    key.Binding
+	Reload      key.Binding
+	Filter      key.Binding
+	Help        key.Binding
 }
 
 func (k uiKeys) ShortHelp() []key.Binding {
@@ -162,32 +164,36 @@ func (k uiKeys) ShortHelp() []key.Binding {
 func (k uiKeys) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Add, k.Edit, k.Delete, k.Toggle},
-		{k.Pri1, k.Pri2, k.Pri3, k.Cycle, k.CycleRev},
-		{k.Filter, k.Reload, k.Help, k.Quit},
+		{k.Pri1, k.Pri2, k.Pri3, k.PrevProject, k.NextProject},
+		{k.Cycle, k.CycleRev, k.Filter, k.Reload, k.Help, k.Quit},
 	}
 }
 
 func newUIKeys() uiKeys {
 	return uiKeys{
-		Quit:     key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
-		Toggle:   key.NewBinding(key.WithKeys("enter", "space"), key.WithHelp("enter", "toggle done")),
-		Add:      key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
-		Edit:     key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
-		Delete:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
-		Pri1:     key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "high pri")),
-		Pri2:     key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "med pri")),
-		Pri3:     key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "low pri")),
-		Cycle:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next view")),
-		CycleRev: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev view")),
-		Reload:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload")),
-		Filter:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
-		Help:     key.NewBinding(key.WithKeys("?", "f1"), key.WithHelp("?", "help")),
+		Quit:        key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
+		Toggle:      key.NewBinding(key.WithKeys("enter", "space"), key.WithHelp("enter", "toggle done")),
+		Add:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
+		Edit:        key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
+		Delete:      key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+		Pri1:        key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "high pri")),
+		Pri2:        key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "med pri")),
+		Pri3:        key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "low pri")),
+		PrevProject: key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev project")),
+		NextProject: key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next project")),
+		Cycle:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next view")),
+		CycleRev:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev view")),
+		Reload:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload")),
+		Filter:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		Help:        key.NewBinding(key.WithKeys("?", "f1"), key.WithHelp("?", "help")),
 	}
 }
 
 type uiModel struct {
-	path  string
-	items []task.Item
+	path    string
+	store   task.Store
+	project string
+	items   []task.Item
 
 	view viewMode
 	mode inputMode
@@ -204,8 +210,15 @@ type uiModel struct {
 	isDark bool
 }
 
-// newUIModel builds the TUI over an already-loaded snapshot.
-func newUIModel(path string, items []task.Item) uiModel {
+// newUIModel builds the TUI over an already-loaded snapshot. When the
+// named project is missing from the store, the model falls back to the
+// default namespace.
+func newUIModel(path string, store task.Store, project string) uiModel {
+	if store.Project(project) == nil {
+		project = task.DefaultProject
+	}
+	p := store.EnsureProject(project)
+
 	l := list.New([]list.Item{}, rowDelegate{}, 0, 0)
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
@@ -220,13 +233,15 @@ func newUIModel(path string, items []task.Item) uiModel {
 	h := help.New()
 
 	m := uiModel{
-		path:   path,
-		items:  items,
-		list:   l,
-		input:  ti,
-		help:   h,
-		keys:   newUIKeys(),
-		isDark: true,
+		path:    path,
+		store:   store,
+		project: project,
+		items:   p.Items,
+		list:    l,
+		input:   ti,
+		help:    h,
+		keys:    newUIKeys(),
+		isDark:  true,
 	}
 	m.refresh("")
 	return m
@@ -235,6 +250,33 @@ func newUIModel(path string, items []task.Item) uiModel {
 // visibleRows returns the current view's rows with global numbers.
 func (m uiModel) visibleRows() []uiRow {
 	return visibleRows(m.items, m.view)
+}
+
+// projectNames lists the namespaces the switcher cycles through. An
+// empty store still reports the default project so the TUI is usable
+// before anything exists.
+func (m uiModel) projectNames() []string {
+	if len(m.store.Projects) == 0 {
+		return []string{task.DefaultProject}
+	}
+	return m.store.ProjectNames()
+}
+
+// switchProject moves the view to the delta-th next project, wrapping
+// around. Unsaved edits to the previous project are kept in the store
+// in memory and persist on the next mutation.
+func (m *uiModel) switchProject(delta int) {
+	names := m.projectNames()
+	k := 0
+	for i, n := range names {
+		if n == m.project {
+			k = i
+			break
+		}
+	}
+	m.project = names[(k+delta+len(names))%len(names)]
+	m.items = m.store.EnsureProject(m.project).Items
+	m.refresh("")
 }
 
 func (m *uiModel) refresh(status string) {
@@ -266,7 +308,8 @@ func (m *uiModel) refresh(status string) {
 	}
 }
 
-// persist writes the current snapshot under the shared data-file lock.
+// persist writes the current snapshot back into the store and to disk
+// under the shared data-file lock.
 func (m *uiModel) persist(action string) {
 	unlock, err := task.Lock(m.path)
 	if err != nil {
@@ -275,7 +318,8 @@ func (m *uiModel) persist(action string) {
 	}
 	defer unlock.Close()
 
-	if err := task.SaveItems(m.path, m.items); err != nil {
+	m.store.EnsureProject(m.project).Items = m.items
+	if err := task.SaveStore(m.path, m.store); err != nil {
 		m.status = fmt.Sprintf("save failed: %v", err)
 		return
 	}
@@ -384,13 +428,25 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Reload):
-		items, err := task.ReadItems(m.path)
+		store, err := task.ReadStore(m.path)
 		if err != nil {
 			m.status = fmt.Sprintf("reload failed: %v", err)
 			return m, nil
 		}
-		m.items = items
+		m.store = store
+		if m.store.Project(m.project) == nil {
+			m.project = task.DefaultProject
+		}
+		m.items = m.store.EnsureProject(m.project).Items
 		m.refresh("reloaded from disk")
+		return m, nil
+
+	case key.Matches(msg, m.keys.NextProject):
+		m.switchProject(1)
+		return m, nil
+
+	case key.Matches(msg, m.keys.PrevProject):
+		m.switchProject(-1)
 		return m, nil
 
 	case key.Matches(msg, m.keys.Add):
@@ -481,7 +537,8 @@ func (m uiModel) View() tea.View {
 		}
 		tabs = append(tabs, tab)
 	}
-	header := lipgloss.JoinHorizontal(lipgloss.Left, tabs...)
+	chip := projectStyle().Render(fmt.Sprintf(" %s ", m.project))
+	header := lipgloss.JoinHorizontal(lipgloss.Left, append([]string{chip}, tabs...)...)
 
 	body := m.list.View()
 
@@ -539,6 +596,11 @@ func selectedStyle() lipgloss.Style {
 
 func activeTabStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230")).Background(lipgloss.Color("238"))
+}
+
+// projectStyle renders the current-project chip left of the view tabs.
+func projectStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("141"))
 }
 
 func tabStyle() lipgloss.Style {

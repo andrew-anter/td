@@ -21,11 +21,15 @@ func setDeleteCompleted(t *testing.T, v bool) {
 
 func readSaved(t *testing.T) []task.Item {
 	t.Helper()
-	got, err := task.ReadItems(viper.GetString("datafile"))
+	store, err := task.ReadStore(viper.GetString("datafile"))
 	if err != nil {
-		t.Fatalf("ReadItems: %v", err)
+		t.Fatalf("ReadStore: %v", err)
 	}
-	return got
+	p := store.Project(task.DefaultProject)
+	if p == nil {
+		return nil
+	}
+	return p.Items
 }
 
 // The number shown next to a completed item in `list --json

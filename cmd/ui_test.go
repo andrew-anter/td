@@ -98,24 +98,76 @@ func TestToggleAndDeleteItem(t *testing.T) {
 	}
 }
 
-// Round-tripping the model's snapshot through SaveItems/ReadItems is
+// Round-tripping the model's snapshot through SaveStore/ReadStore is
 // what persist() does on every mutation.
 func TestUIPersistRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.json")
-	items := []task.Item{{Text: "one", Priority: 2, Done: false}}
-	m := newUIModel(path, items)
+	store := task.Store{Projects: []task.Project{{
+		Name:  task.DefaultProject,
+		Items: []task.Item{{Text: "one", Priority: 2, Done: false}},
+	}}}
+	m := newUIModel(path, store, task.DefaultProject)
 	m.items = append(m.items, task.Item{Text: "two", Priority: 1, Done: true})
 	m.persist("added")
 	if m.status != "added" {
 		t.Fatalf("persist set status %q, want %q", m.status, "added")
 	}
 
-	got, err := task.ReadItems(path)
+	got, err := task.ReadStore(path)
 	if err != nil {
-		t.Fatalf("ReadItems: %v", err)
+		t.Fatalf("ReadStore: %v", err)
 	}
-	if len(got) != 2 || got[1].Text != "two" || !got[1].Done {
+	p := got.Project(task.DefaultProject)
+	if p == nil || len(p.Items) != 2 || p.Items[1].Text != "two" || !p.Items[1].Done {
 		t.Fatalf("saved file = %+v", got)
+	}
+}
+
+// The project switcher must cycle through the store's namespaces in
+// order, wrapping both ways, and carry each project's own items.
+func TestSwitchProjectCycles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{
+		{Name: "inbox", Items: []task.Item{{Text: "i", Priority: 2}}},
+		{Name: "work", Items: []task.Item{{Text: "w", Priority: 2}}},
+	}}
+	m := newUIModel(path, store, "inbox")
+
+	m.switchProject(1)
+	if m.project != "work" || len(m.items) != 1 || m.items[0].Text != "w" {
+		t.Fatalf("after next: project=%q items=%+v", m.project, m.items)
+	}
+	m.switchProject(1)
+	if m.project != "inbox" {
+		t.Errorf("forward wrap-around failed: project=%q", m.project)
+	}
+	m.switchProject(-1)
+	if m.project != "work" {
+		t.Errorf("backward wrap-around failed: project=%q", m.project)
+	}
+}
+
+// persist() must write the active project's items and leave every
+// other project in the store untouched.
+func TestPersistKeepsOtherProjects(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{
+		{Name: "work", Items: []task.Item{{Text: "keep me", Priority: 2}}},
+	}}
+	m := newUIModel(path, store, task.DefaultProject)
+	m.items = append(m.items, task.Item{Text: "new inbox item", Priority: 2})
+	m.persist("added")
+
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	if w := got.Project("work"); w == nil || len(w.Items) != 1 || w.Items[0].Text != "keep me" {
+		t.Errorf("work project clobbered: %+v", got)
+	}
+	in := got.Project(task.DefaultProject)
+	if in == nil || len(in.Items) != 1 || in.Items[0].Text != "new inbox item" {
+		t.Errorf("inbox persist wrong: %+v", in)
 	}
 }
 
@@ -123,10 +175,14 @@ func TestUIPersistRoundTrip(t *testing.T) {
 // 1 and stays addressable in the same view.
 func TestVisibleRowsAfterDeleteRenumber(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.json")
-	m := newUIModel(path, []task.Item{
-		{Text: "a", Priority: 1, Done: false},
-		{Text: "b", Priority: 2, Done: false},
-	})
+	store := task.Store{Projects: []task.Project{{
+		Name: task.DefaultProject,
+		Items: []task.Item{
+			{Text: "a", Priority: 1, Done: false},
+			{Text: "b", Priority: 2, Done: false},
+		},
+	}}}
+	m := newUIModel(path, store, task.DefaultProject)
 	m.items = deleteItem(m.items, m.visibleRows()[0].fileIdx)
 	m.refresh("deleted")
 

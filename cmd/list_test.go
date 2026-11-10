@@ -39,14 +39,19 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	return string(out), fnErr
 }
 
-// writeDataFile writes items to a temp file and points viper at it.
-// Tests that call this must not use t.Parallel().
+// writeDataFile writes items into the default project of a temp
+// store file and points viper at it. Tests that call this must not
+// use t.Parallel().
 func writeDataFile(t *testing.T, items []task.Item) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tasks.json")
-	if err := task.SaveItems(path, items); err != nil {
-		t.Fatalf("SaveItems: %v", err)
+	store := task.Store{}
+	if len(items) > 0 {
+		store.Projects = []task.Project{{Name: task.DefaultProject, Items: items}}
+	}
+	if err := task.SaveStore(path, store); err != nil {
+		t.Fatalf("SaveStore: %v", err)
 	}
 	viper.Set("datafile", path)
 }

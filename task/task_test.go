@@ -82,36 +82,124 @@ func TestByPriStableSort(t *testing.T) {
 	}
 }
 
-func TestSaveAndReadItems(t *testing.T) {
+func TestSaveAndReadStore(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tasks.json")
 
-	in := []Item{
-		{Text: "first", Priority: 1, Done: false},
-		{Text: "second", Priority: 3, Done: true},
-		{Text: "third", Priority: 2, Done: false},
+	in := Store{Projects: []Project{
+		{Name: "inbox", Items: []Item{
+			{Text: "first", Priority: 1, Done: false},
+			{Text: "second", Priority: 3, Done: true},
+		}},
+		{Name: "work", Items: []Item{{Text: "ship v2", Priority: 2, Done: false}}},
+		{Name: "empty"},
+	}}
+
+	if err := SaveStore(path, in); err != nil {
+		t.Fatalf("SaveStore: %v", err)
 	}
 
-	if err := SaveItems(path, in); err != nil {
-		t.Fatalf("SaveItems: %v", err)
-	}
-
-	out, err := ReadItems(path)
+	out, err := ReadStore(path)
 	if err != nil {
-		t.Fatalf("ReadItems: %v", err)
+		t.Fatalf("ReadStore: %v", err)
 	}
 	if !reflect.DeepEqual(in, out) {
 		t.Errorf("round-trip mismatch:\n in: %+v\nout: %+v", in, out)
 	}
 }
 
-func TestSaveItemsRejectsBadPath(t *testing.T) {
+// A data file in the pre-projects format (a bare JSON array of items)
+// must load with its items in the default project, and reading must
+// not rewrite the file.
+func TestReadStoreMigratesLegacyArray(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.json")
+	legacy := `[{"Text":"milk","Priority":2,"Done":false},{"Text":"paid","Priority":1,"Done":true}]`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	p := s.Project(DefaultProject)
+	if p == nil {
+		t.Fatalf("legacy items did not land in %q: %+v", DefaultProject, s)
+	}
+	if len(p.Items) != 2 || p.Items[0].Text != "milk" || !p.Items[1].Done {
+		t.Errorf("migrated items = %+v", p.Items)
+	}
+	if b, _ := os.ReadFile(path); string(b) != legacy {
+		t.Errorf("read mutated the data file")
+	}
+}
+
+func TestReadStoreEmptyVariants(t *testing.T) {
+	dir := t.TempDir()
+	for _, content := range []string{"[]", "", "   "} {
+		path := filepath.Join(dir, "tasks.json")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s, err := ReadStore(path)
+		if err != nil {
+			t.Fatalf("ReadStore(%q): %v", content, err)
+		}
+		if len(s.Projects) != 0 {
+			t.Errorf("ReadStore(%q) = %+v, want no projects", content, s)
+		}
+	}
+}
+
+func TestSaveStoreRejectsBadPath(t *testing.T) {
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "does", "not", "exist", "tasks.json")
-	if err := SaveItems(bad, []Item{{Text: "x"}}); err == nil {
+	if err := SaveStore(bad, Store{Projects: []Project{{Name: "x"}}}); err == nil {
 		t.Fatalf("expected error saving into non-existent directory")
 	}
 	if _, err := os.Stat(bad); err == nil {
 		t.Errorf("partial file was created at %s", bad)
+	}
+}
+
+func TestStoreProjectMethods(t *testing.T) {
+	s := Store{}
+	if s.Project("work") != nil {
+		t.Errorf("Project on empty store should be nil")
+	}
+	p := s.EnsureProject("work")
+	p.Items = append(p.Items, Item{Text: "a", Priority: 2})
+	if got := s.Project("work"); got == nil || len(got.Items) != 1 {
+		t.Fatalf("EnsureProject append not visible through Project: %+v", s)
+	}
+	s.EnsureProject("work") // idempotent
+	if len(s.Projects) != 1 {
+		t.Errorf("EnsureProject duplicated the project: %+v", s.Projects)
+	}
+	s.EnsureProject("home")
+	if names := s.ProjectNames(); !reflect.DeepEqual(names, []string{"work", "home"}) {
+		t.Errorf("ProjectNames = %v", names)
+	}
+	if !s.RemoveProject("work") || s.RemoveProject("work") {
+		t.Errorf("RemoveProject should report true once, then false")
+	}
+	if names := s.ProjectNames(); !reflect.DeepEqual(names, []string{"home"}) {
+		t.Errorf("after remove ProjectNames = %v", names)
+	}
+}
+
+func TestValidateProjectName(t *testing.T) {
+	ok := []string{"work", "home-chores", "v2", "a1"}
+	bad := []string{"", " ", "two words", "tab\there", "trail "}
+	for _, n := range ok {
+		if err := ValidateProjectName(n); err != nil {
+			t.Errorf("ValidateProjectName(%q) = %v, want nil", n, err)
+		}
+	}
+	for _, n := range bad {
+		if err := ValidateProjectName(n); err == nil {
+			t.Errorf("ValidateProjectName(%q) = nil, want error", n)
+		}
 	}
 }

@@ -40,13 +40,18 @@ func reopenRun(cmd *cobra.Command, args []string) error {
 	}
 	defer unlock.Close()
 
-	items, err := task.ReadItems(path)
+	store, err := task.ReadStore(path)
 	if err != nil {
 		return fmt.Errorf("failed to read items: %w", err)
 	}
+	project, err := resolveProject(&store, true)
+	if err != nil {
+		return err
+	}
+	items := project.Items
 
 	if i < 1 || i > len(items) {
-		return fmt.Errorf("%d does not match any items", i)
+		return fmt.Errorf("%d does not match any items in project %q", i, project.Name)
 	}
 
 	// Find the original index of the i-th item as it would appear in
@@ -59,7 +64,7 @@ func reopenRun(cmd *cobra.Command, args []string) error {
 	}
 	items[target].Done = false
 
-	if err := task.SaveItems(path, items); err != nil {
+	if err := task.SaveStore(path, store); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)
 	}
 	fmt.Printf("%q %s\n", items[target].Text, "reopened")
