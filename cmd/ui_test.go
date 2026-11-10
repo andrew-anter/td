@@ -171,6 +171,58 @@ func TestPersistKeepsOtherProjects(t *testing.T) {
 	}
 }
 
+// createProject validates, adds, switches to, and persists a new
+// namespace; duplicates and invalid names are refused without
+// touching the store.
+func TestCreateProject(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	m := newUIModel(path, task.Store{}, task.DefaultProject)
+
+	if err := m.createProject("gym"); err != nil {
+		t.Fatalf("createProject: %v", err)
+	}
+	if m.project != "gym" || m.status != `created project "gym"` {
+		t.Fatalf("after create: project=%q status=%q", m.project, m.status)
+	}
+	if err := m.createProject("gym"); err == nil {
+		t.Errorf("expected duplicate project error")
+	}
+	if err := m.createProject("two words"); err == nil {
+		t.Errorf("expected whitespace name error")
+	}
+
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	names := got.ProjectNames()
+	if len(names) != 2 || names[0] != task.DefaultProject || names[1] != "gym" {
+		t.Errorf("persisted projects = %v, want [inbox gym]", names)
+	}
+}
+
+// setProject must swap both the name and the item slice the views and
+// mutations operate on.
+func TestSetProjectSwapsItems(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{
+		{Name: "a", Items: []task.Item{{Text: "in a", Priority: 2}}},
+		{Name: "b", Items: []task.Item{{Text: "in b1", Priority: 2}, {Text: "in b2", Priority: 2}}},
+	}}
+	m := newUIModel(path, store, "a")
+	if len(m.items) != 1 {
+		t.Fatalf("model items = %+v", m.items)
+	}
+	m.setProject("b")
+	if m.project != "b" || len(m.items) != 2 || m.items[0].Text != "in b1" {
+		t.Errorf("after setProject(b): project=%q items=%+v", m.project, m.items)
+	}
+	m.setProject("fresh")
+	if m.project != "fresh" || len(m.items) != 0 {
+		t.Errorf("setProject on a missing name should give an empty namespace: %+v", m.items)
+	}
+}
+
 // After deleting the top pending item, the survivor is renumbered to
 // 1 and stays addressable in the same view.
 func TestVisibleRowsAfterDeleteRenumber(t *testing.T) {

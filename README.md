@@ -230,6 +230,7 @@ Run `td` with no arguments:
 | `e`          | edit the selected item's text                        |
 | `d`          | delete the selected item                             |
 | `1` / `2` / `3` | set the selected item's priority                  |
+| `p`          | open the project picker (enter select, `n` new, esc close) |
 | `[` / `]`    | switch to the previous / next project                |
 | `tab` / `shift+tab` | cycle views: pending → all → completed        |
 | `/`          | fuzzy-filter the current view; `esc` clears          |
@@ -238,12 +239,14 @@ Run `td` with no arguments:
 | `q`, `esc`, `ctrl+c` | quit                                         |
 
 The project chip in the header shows which namespace the list, the
-numbers, and every mutation belong to. Every mutation is locked and
-saved immediately, and the numbers shown are the same per-project
-numbers the CLI accepts with the same `-P` — a row labeled `4.` in the
-completed view is `td delete 4` / `td reopen 4` in that project. Because
-the TUI holds a full snapshot, changes made by *other* processes while
-the UI is open are picked up by pressing `r` (the last save wins).
+numbers, and every mutation belong to — with a position counter (`2/4`)
+when more than one project exists. Press `p` to pick, create, or inspect
+projects without leaving the UI. Every mutation is locked and saved
+immediately, and the numbers shown are the same per-project numbers the
+CLI accepts with the same `-P` — a row labeled `4.` in the completed
+view is `td delete 4` / `td reopen 4` in that project. Because the TUI
+holds a full snapshot, changes made by *other* processes while the UI is
+open are picked up by pressing `r` (the last save wins).
 
 **Waybar / status bars:** for a count in any status bar, exec the CLI —
 e.g. waybar (the `format` glyph is FA Free "hat-wizard", U+F6E8 — use
