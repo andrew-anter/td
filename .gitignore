@@ -22,3 +22,8 @@ go.work.sum
 
 # OS junk
 Thumbs.db
+
+# Personal todo data and config (never commit)
+.tasks.json
+.tasks.json.lock
+.todo.yaml
