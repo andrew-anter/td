@@ -31,7 +31,15 @@ func completeRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%q is not a valid label: %w", args[0], err)
 	}
 
-	items, err := task.ReadItems(viper.GetString("datafile"))
+	path := viper.GetString("datafile")
+
+	unlock, err := task.Lock(path)
+	if err != nil {
+		return fmt.Errorf("failed to lock data file: %w", err)
+	}
+	defer unlock.Close()
+
+	items, err := task.ReadItems(path)
 	if err != nil {
 		return fmt.Errorf("failed to read items: %w", err)
 	}
@@ -46,7 +54,7 @@ func completeRun(cmd *cobra.Command, args []string) error {
 	target := sortedOrderIndices(items)[i-1]
 	items[target].Done = true
 
-	if err := task.SaveItems(viper.GetString("datafile"), items); err != nil {
+	if err := task.SaveItems(path, items); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)
 	}
 	fmt.Printf("%q %s\n", items[target].Text, "marked complete")

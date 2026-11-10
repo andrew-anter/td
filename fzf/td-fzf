@@ -43,12 +43,13 @@ export TD_FZF_STATE=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/td-fzf-view.XXXXXX")
 trap 'rm -f "$TD_FZF_STATE"' EXIT INT TERM
 printf '%s' "$VIEW" > "$TD_FZF_STATE"
 
+TAB=$(printf '\t')
 printf '%s\n' "$items" | fzf \
     --height=40% \
     --reverse \
     --prompt="td [$VIEW] ❯ " \
     --header='enter: toggle · ctrl-d: delete · ctrl-a: add · ctrl-t: cycle view' \
-    --delimiter=$'\t' \
+    --delimiter="$TAB" \
     --with-nth=2 \
     --preview='printf "  %s\n" {2}' \
     --preview-window='up:1:wrap' \

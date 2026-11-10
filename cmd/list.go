@@ -39,8 +39,12 @@ var listCmd = &cobra.Command{
 Output modes:
   default    Human-readable table (pending items, sorted by priority).
   --json     Emit the items as a JSON array, each item with a 1-based
-             "Index" field matching the human list, in display order.
+             "Index" field in display order.
   --count    Emit a single JSON object {"pending":N,"completed":N,"total":N}.
+
+Item numbers are positions in the full sorted list and are identical
+across views and with --json, so a number shown in any view can be
+passed directly to complete, delete, edit, or reopen.
 
 Filters (default, --all, --completed) apply to both the human and --json
 output. --count always reports totals across the whole data file.`,
@@ -83,10 +87,19 @@ func runList(opts listOptions) error {
 
 	sort.Stable(task.ByPri(items))
 
-	filtered := make([]task.Item, 0, len(items))
-	for _, i := range items {
-		if opts.ShowAll || i.Done == opts.ShowCompleted {
-			filtered = append(filtered, i)
+	// Number rows by their position in the FULL sorted list, not by
+	// position within the filter. `complete`/`delete`/`edit`/`reopen`
+	// resolve their argument against that same global order, so a
+	// number copied from any view — pending, --all, or --completed —
+	// always targets exactly the item it labels.
+	type row struct {
+		Index int
+		Item  task.Item
+	}
+	rows := make([]row, 0, len(items))
+	for k := range items {
+		if opts.ShowAll || items[k].Done == opts.ShowCompleted {
+			rows = append(rows, row{Index: k + 1, Item: items[k]})
 		}
 	}
 
@@ -97,16 +110,16 @@ func runList(opts listOptions) error {
 			Priority int    `json:"Priority"`
 			Done     bool   `json:"Done"`
 		}
-		out := make([]entry, len(filtered))
-		for k, i := range filtered {
-			out[k] = entry{Index: k + 1, Text: i.Text, Priority: i.Priority, Done: i.Done}
+		out := make([]entry, len(rows))
+		for k, r := range rows {
+			out[k] = entry{Index: r.Index, Text: r.Item.Text, Priority: r.Item.Priority, Done: r.Item.Done}
 		}
 		return json.NewEncoder(os.Stdout).Encode(out)
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 3, 0, 1, ' ', 0)
-	for idx, i := range filtered {
-		fmt.Fprintf(w, "%d.\t%s\t%s\t%s\n", idx+1, i.PrettyDone(), i.PrettyP(), i.Text)
+	for _, r := range rows {
+		fmt.Fprintf(w, "%d.\t%s\t%s\t%s\n", r.Index, r.Item.PrettyDone(), r.Item.PrettyP(), r.Item.Text)
 	}
 	return w.Flush()
 }

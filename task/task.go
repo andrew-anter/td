@@ -1,10 +1,11 @@
 /*
-Copyright © 2025 Andrew Anter <andrew.anter@gmail.com>
+Package Task Copyright © 2025 Andrew Anter <andrew.anter@gmail.com>
 */
 package task
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -32,14 +33,15 @@ func (s ByPri) Less(i, j int) bool {
 	return false
 }
 
-func (i *Item) SetPriority(pri int) {
+// SetPriority assigns pri, which must be 1, 2, or 3. Anything else
+// leaves the item untouched and returns an error.
+func (i *Item) SetPriority(pri int) error {
 	switch pri {
-	case 1:
-		i.Priority = 1
-	case 3:
-		i.Priority = 3
+	case 1, 2, 3:
+		i.Priority = pri
+		return nil
 	default:
-		i.Priority = 2
+		return fmt.Errorf("invalid priority %d: must be 1, 2, or 3", pri)
 	}
 }
 

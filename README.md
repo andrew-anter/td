@@ -62,7 +62,7 @@ td delete --completed  # remove every completed task
 | `-p, --priority N`    | `add`      | `2`                       | Priority `1` (high), `2`, `3` (low). |
 | `-a, --all`           | `list`     | `false`                   | Show complete and pending items. |
 | `-d, --completed`     | `list`     | `false`                   | Show only completed items. |
-| `--json`              | `list`     | `false`                   | Emit items as a JSON array (display order, with 1-based `Index`). |
+| `--json`              | `list`     | `false`                   | Emit items as a JSON array (display order, with global 1-based `Index`). |
 | `--count`             | `list`     | `false`                   | Emit `{"pending","completed","total"}` as JSON. Ignores filter flags. |
 | `--completed`         | `delete`   | `false`                   | Delete every completed task (instead of a single item). |
 | `-f, --datafile <path>` | global    | `$HOME/.tasks.json`       | Where tasks are stored.    |
@@ -71,8 +71,10 @@ td delete --completed  # remove every completed task
 ### JSON output
 
 `td list --json` is useful for scripts and status bars (e.g. waybar). The
-array mirrors the data-file shape plus a 1-based `Index` matching the
-human list:
+array mirrors the data-file shape plus a 1-based `Index`: the item's
+position in the full sorted list. Numbers are identical across all views
+(`--all`, `--completed`) and the human table, so a number you see can be
+passed straight to `complete`, `delete`, `edit`, or `reopen`:
 
 ```sh
 $ td list --json

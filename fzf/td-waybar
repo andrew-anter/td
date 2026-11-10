@@ -5,15 +5,8 @@
 # - tooltip: full pending list
 # - class: "pending" when there are open tasks, "empty" otherwise
 
-# Resolve the datafile the same way `td` does, so we honor
-# TODO_DATAFILE, $HOME/.todo.yaml, and --datafile consistently.
-DATA=$(awk -F': *' '/^datafile:/ {print $2; exit}' "$HOME/.todo.yaml" 2>/dev/null)
-DATA=${DATA:-$HOME/.tasks.json}
-
-# Strip surrounding quotes the YAML parser might leave behind.
-DATA=${DATA%\"}
-DATA=${DATA#\"}
-
+# `td` resolves the datafile itself (flag, TODO_DATAFILE,
+# $HOME/.todo.yaml, default), so we just invoke it normally.
 count_line=$(td list --count 2>/dev/null)
 pending=$(printf '%s' "$count_line" | sed -n 's/.*"pending":\([0-9]*\).*/\1/p')
 [ -z "$pending" ] && pending=0
@@ -27,8 +20,9 @@ tooltip=$(td list 2>/dev/null)
 if [ -z "$tooltip" ]; then
     tooltip='No pending tasks'
 else
-    # JSON-escape: replace literal newlines with "\n" and escape quotes.
+    # JSON-escape: backslashes first, then quotes, then newlines.
     tooltip=$(printf '%s' "$tooltip" \
+        | sed 's/\\/\\\\/g' \
         | sed ':a;N;$!ba;s/\n/\\n/g' \
         | sed 's/"/\\"/g')
 fi

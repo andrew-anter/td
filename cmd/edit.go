@@ -23,17 +23,24 @@ var editCmd = &cobra.Command{
 }
 
 func editRun(cmd *cobra.Command, args []string) error {
-	items, err := task.ReadItems(viper.GetString("datafile"))
+	path := viper.GetString("datafile")
+
+	unlock, err := task.Lock(path)
+	if err != nil {
+		return fmt.Errorf("failed to lock data file: %w", err)
+	}
+	defer unlock.Close()
+
+	items, err := task.ReadItems(path)
 	if err != nil {
 		return fmt.Errorf("failed to read items: %w", err)
 	}
 
-	err = editTaskTitle(items, args[0], args[1])
-	if err != nil {
+	if err := editTaskTitle(items, args[0], args[1]); err != nil {
 		return fmt.Errorf("failed to edit item: %w", err)
 	}
 
-	if err := task.SaveItems(viper.GetString("datafile"), items); err != nil {
+	if err := task.SaveItems(path, items); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)
 	}
 	return nil

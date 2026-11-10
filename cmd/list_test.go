@@ -225,12 +225,25 @@ func TestRunListJSON_CompletedFilter(t *testing.T) {
 		t.Fatalf("runList: %v", err)
 	}
 
-	var got []task.Item
+	var got []struct {
+		Index int    `json:"Index"`
+		Text  string `json:"Text"`
+		Done  bool   `json:"Done"`
+	}
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("unmarshal %q: %v", out, err)
 	}
 	if len(got) != 2 {
 		t.Fatalf("got %d items, want 2: %+v", len(got), got)
+	}
+	// Index is the item's position in the FULL sorted list (pending
+	// first), so numbers taken from the completed view address the
+	// same items that complete/delete/edit/reopen expect.
+	if got[0].Index != 2 || got[0].Text != "done-a" {
+		t.Errorf("first completed row = %+v, want Index 2 done-a", got[0])
+	}
+	if got[1].Index != 3 || got[1].Text != "done-b" {
+		t.Errorf("second completed row = %+v, want Index 3 done-b", got[1])
 	}
 	for _, it := range got {
 		if !it.Done {

@@ -14,19 +14,24 @@ import (
 func TestSetPriority(t *testing.T) {
 	cases := []struct {
 		in, want int
+		wantOk   bool
 	}{
-		{1, 1},
-		{3, 3},
-		{2, 2},
-		{0, 2},
-		{4, 2},
-		{-1, 2},
+		{1, 1, true},
+		{2, 2, true},
+		{3, 3, true},
+		// Invalid values must error and leave the item untouched.
+		{0, 0, false},
+		{4, 0, false},
+		{-1, 0, false},
 	}
 	for _, c := range cases {
 		var it Item
-		it.SetPriority(c.in)
+		err := it.SetPriority(c.in)
+		if c.wantOk != (err == nil) {
+			t.Errorf("SetPriority(%d) error = %v, wantOk = %v", c.in, err, c.wantOk)
+		}
 		if it.Priority != c.want {
-			t.Errorf("SetPriority(%d) = %d, want %d", c.in, it.Priority, c.want)
+			t.Errorf("SetPriority(%d) left Priority = %d, want %d", c.in, it.Priority, c.want)
 		}
 	}
 }
