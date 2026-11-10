@@ -816,22 +816,7 @@ func (m uiModel) View() tea.View {
 	inProjects := m.mode == modeProjects || m.mode == modeNewProject || m.mode == modeRename
 
 	var header string
-	if inProjects {
-		// On the projects screen the top bar itself becomes the
-		// project tabs: one per namespace, cursor highlighted.
-		names := m.panelNames()
-		ptabs := make([]string, 0, len(names))
-		for i, n := range names {
-			tab := fmt.Sprintf(" %s ", n)
-			if i == m.pickerIdx {
-				tab = activeTabStyle().Render(tab)
-			} else {
-				tab = tabStyle().Render(tab)
-			}
-			ptabs = append(ptabs, tab)
-		}
-		header = lipgloss.JoinHorizontal(lipgloss.Left, ptabs...)
-	} else {
+	if !inProjects {
 		pending, done := 0, 0
 		for _, it := range m.items {
 			if it.Done {
@@ -876,13 +861,11 @@ func (m uiModel) View() tea.View {
 
 	body := m.list.View()
 	if inProjects {
-		// Pad to the content height (minus the blank spacer line)
-		// so the context help keeps its usual place at the bottom.
-		h := m.contentHeight() - 1
-		if h < 1 {
-			h = 1
-		}
-		body = lipgloss.NewStyle().Height(h).Render(m.projectsView())
+		// The projects screen drops the header entirely — its rows
+		// already list every project — and reclaims that line, so
+		// total height (and thus the footer position) matches the
+		// task list.
+		body = lipgloss.NewStyle().Height(m.contentHeight() + 1).Render(m.projectsView())
 	}
 
 	var inputLine string
@@ -908,11 +891,10 @@ func (m uiModel) View() tea.View {
 		footer = m.help.View(m.keys)
 	}
 
-	parts := []string{header}
+	parts := []string{header, body}
 	if inProjects {
-		parts = append(parts, "") // breathing room under the tab bar
+		parts = []string{body}
 	}
-	parts = append(parts, body)
 	if inputLine != "" {
 		parts = append(parts, inputLine)
 	}
