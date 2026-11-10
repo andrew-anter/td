@@ -187,8 +187,11 @@ func TestCreateProject(t *testing.T) {
 	if err := m.createProject("gym"); err == nil {
 		t.Errorf("expected duplicate project error")
 	}
-	if err := m.createProject("two words"); err == nil {
-		t.Errorf("expected whitespace name error")
+	if err := m.createProject("two words"); err != nil {
+		t.Errorf("names with spaces should be accepted: %v", err)
+	}
+	if err := m.createProject("tab\there"); err == nil {
+		t.Errorf("expected control character error")
 	}
 
 	got, err := task.ReadStore(path)
@@ -196,8 +199,8 @@ func TestCreateProject(t *testing.T) {
 		t.Fatalf("ReadStore: %v", err)
 	}
 	names := got.ProjectNames()
-	if len(names) != 2 || names[0] != task.DefaultProject || names[1] != "gym" {
-		t.Errorf("persisted projects = %v, want [inbox gym]", names)
+	if len(names) != 3 || names[0] != task.DefaultProject || names[1] != "gym" || names[2] != "two words" {
+		t.Errorf("persisted projects = %v, want [inbox gym two words]", names)
 	}
 }
 
@@ -220,6 +223,40 @@ func TestSetProjectSwapsItems(t *testing.T) {
 	m.setProject("fresh")
 	if m.project != "fresh" || len(m.items) != 0 {
 		t.Errorf("setProject on a missing name should give an empty namespace: %+v", m.items)
+	}
+}
+
+// moveSelectedTo relocates the cursor row into another project,
+// preserves its state, persists immediately, and moveTargets excludes
+// the current namespace.
+func TestMoveSelectedTo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{
+		{Name: "a", Items: []task.Item{{Text: "y", Priority: 2}, {Text: "x", Priority: 1}}},
+		{Name: "b"},
+	}}
+	m := newUIModel(path, store, "a")
+
+	if names := m.moveTargets(); len(names) != 1 || names[0] != "b" {
+		t.Fatalf("moveTargets = %v, want [b]", names)
+	}
+
+	// Cursor starts on row 1: "x" (P1 sorts first).
+	m.moveSelectedTo("b")
+	if m.status != `moved "x" to "b"` {
+		t.Fatalf("status = %q", m.status)
+	}
+	if len(m.items) != 1 || m.items[0].Text != "y" {
+		t.Errorf("source items = %+v, want only y", m.items)
+	}
+
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	b := got.Project("b")
+	if b == nil || len(b.Items) != 1 || b.Items[0].Text != "x" || b.Items[0].Priority != 1 {
+		t.Errorf("target project = %+v, want x (P1)", b)
 	}
 }
 

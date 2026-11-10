@@ -6,6 +6,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"todo/task"
 
@@ -100,7 +101,7 @@ func projectListRun(cmd *cobra.Command, args []string) error {
 }
 
 func projectCreateRun(cmd *cobra.Command, args []string) error {
-	name := args[0]
+	name := strings.TrimSpace(args[0])
 	if err := task.ValidateProjectName(name); err != nil {
 		return err
 	}
@@ -129,7 +130,7 @@ func projectCreateRun(cmd *cobra.Command, args []string) error {
 }
 
 func projectDeleteRun(cmd *cobra.Command, args []string) error {
-	name := args[0]
+	name := strings.TrimSpace(args[0])
 
 	path := viper.GetString("datafile")
 	unlock, err := task.Lock(path)
@@ -163,7 +164,7 @@ func projectDeleteRun(cmd *cobra.Command, args []string) error {
 }
 
 func projectRenameRun(cmd *cobra.Command, args []string) error {
-	oldName, newName := args[0], args[1]
+	oldName, newName := strings.TrimSpace(args[0]), strings.TrimSpace(args[1])
 	if err := task.ValidateProjectName(newName); err != nil {
 		return err
 	}

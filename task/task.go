@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // DefaultProject is the namespace used when no --project is given.
@@ -121,16 +122,17 @@ func (s *Store) ProjectNames() []string {
 	return names
 }
 
-// ValidateProjectName rejects empty names and names containing
-// whitespace or control characters, so a project stays usable as a
-// single unquoted CLI argument.
+// ValidateProjectName rejects blank names and names containing control
+// characters. Spaces inside a name are allowed — quote the value on
+// the CLI, or just type it in the TUI; callers trim leading/trailing
+// whitespace before validating.
 func ValidateProjectName(name string) error {
-	if name == "" {
+	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("project name must not be empty")
 	}
 	for _, r := range name {
-		if r <= ' ' {
-			return fmt.Errorf("project name %q must not contain whitespace", name)
+		if r < ' ' {
+			return fmt.Errorf("project name %q must not contain control characters", name)
 		}
 	}
 	return nil

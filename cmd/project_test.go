@@ -105,8 +105,22 @@ func TestProjectCreateAndDuplicate(t *testing.T) {
 	if err := projectCreateRun(nil, []string{"work"}); err == nil {
 		t.Errorf("expected error creating a duplicate project")
 	}
-	if err := projectCreateRun(nil, []string{"two words"}); err == nil {
-		t.Errorf("expected error for name containing whitespace")
+	// Spaces are allowed; edges are trimmed; control characters are not.
+	if _, err := captureStdout(t, func() error {
+		return projectCreateRun(nil, []string{"two words"})
+	}); err != nil {
+		t.Errorf("name with spaces should be accepted: %v", err)
+	}
+	if _, err := captureStdout(t, func() error {
+		return projectCreateRun(nil, []string{" padded "})
+	}); err != nil {
+		t.Errorf("padded name should be accepted: %v", err)
+	}
+	if got := readStore(t); got.Project("padded") == nil {
+		t.Errorf("surrounding whitespace was not trimmed: %+v", got.ProjectNames())
+	}
+	if err := projectCreateRun(nil, []string{"tab\there"}); err == nil {
+		t.Errorf("expected error for name containing control characters")
 	}
 }
 

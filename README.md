@@ -67,6 +67,7 @@ td list -P gym           # pending items of "gym"
 td list --all            # everything, pending and completed
 td completed             # completed items only
 td project               # list projects with counts (alias: projects)
+td move 2 gym            # aliases: mv — item #2 of the current project → gym
 td edit 2 "buy oat milk" # replace item #2's text
 td complete 1            # aliases: c, comp — mark item #1 done
 td reopen 1              # alias: uncomplete — mark item #1 pending
@@ -85,8 +86,9 @@ td delete --completed    # remove every completed task
 | `complete <n>`    | `c`, `comp`  | Mark item `n` as done.                                        |
 | `reopen <n>`      | `uncomplete` | Mark item `n` as pending (silent no-op if already pending).    |
 | `delete <n>`      | `rm`, `del`  | Delete item `n`, or with `--completed` delete every done item. |
+| `move <n> <proj>` | `mv`         | Move item `n` from the current project into `<proj>` (must exist; state is kept). |
 | `project`         | `projects`   | List projects with pending/done/total counts; the active one is marked `*`. |
-| `project create <name>` | —      | Create a new project (names must be a single token).           |
+| `project create <name>` | —      | Create a new project. Names may contain spaces (quote them on the CLI); leading/trailing whitespace is trimmed, control characters are rejected. |
 | `project delete <name>` | —     | Delete a project and its items (`--force` required when it still has items). |
 | `project rename <old> <new>` | — | Rename a project, keeping its items.                          |
 
@@ -112,7 +114,7 @@ pending list instead, exactly like `td list`.
 ## Projects and item numbers
 
 Projects are namespaces. Every item command (`add`, `list`, `complete`,
-`edit`, `reopen`, `delete`, `completed`) operates on exactly one
+`edit`, `reopen`, `delete`, `completed`, `move`) operates on exactly one
 project, chosen with `-P` / `--project` (or the `project` config key);
 when omitted, the default project `inbox` is used. Item `3` of `gym`
 and item `3` of `inbox` are different, unrelated items.
@@ -230,6 +232,7 @@ Run `td` with no arguments:
 | `e`          | edit the selected item's text                        |
 | `d`          | delete the selected item                             |
 | `1` / `2` / `3` | set the selected item's priority                  |
+| `m`          | move the selected item to another project (overlay: enter picks) |
 | `p`          | open the project picker (enter select, `n` new, esc close) |
 | `[` / `]`    | switch to the previous / next project                |
 | `tab` / `shift+tab` | cycle views: pending → all → completed        |
@@ -282,6 +285,7 @@ cmd/                 # cobra commands (flag parsing, output, orchestration)
   add.go             # `add`
   list.go            # `list` / `ls`, shared runList + JSON/count modes
   project.go         # `project` list/create/delete/rename + project resolution
+  move.go            # `move` / `mv` — cross-project item relocation
   complete.go        # `complete` / `c` / `comp`
   reopen.go          # `reopen` / `uncomplete`
   completed.go       # `completed`

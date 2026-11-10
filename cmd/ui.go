@@ -139,6 +139,7 @@ const (
 	modeEdit
 	modePicker     // project picker overlay
 	modeNewProject // textinput for a new project name
+	modeMove       // move-selected-item-to-project overlay
 )
 
 type uiKeys struct {
@@ -153,6 +154,7 @@ type uiKeys struct {
 	PrevProject key.Binding
 	NextProject key.Binding
 	Pick        key.Binding
+	Move        key.Binding
 	Cycle       key.Binding
 	CycleRev    key.Binding
 	Reload      key.Binding
@@ -161,13 +163,13 @@ type uiKeys struct {
 }
 
 func (k uiKeys) ShortHelp() []key.Binding {
-	return []key.Binding{k.Add, k.Toggle, k.Edit, k.Delete, k.Pick, k.Cycle, k.Filter, k.Quit}
+	return []key.Binding{k.Add, k.Toggle, k.Edit, k.Delete, k.Move, k.Pick, k.Cycle, k.Filter, k.Quit}
 }
 
 func (k uiKeys) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Add, k.Edit, k.Delete, k.Toggle},
-		{k.Pri1, k.Pri2, k.Pri3, k.Pick, k.PrevProject, k.NextProject},
+		{k.Pri1, k.Pri2, k.Pri3, k.Move, k.Pick, k.PrevProject, k.NextProject},
 		{k.Cycle, k.CycleRev, k.Filter, k.Reload, k.Help, k.Quit},
 	}
 }
@@ -185,6 +187,7 @@ func newUIKeys() uiKeys {
 		PrevProject: key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev project")),
 		NextProject: key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next project")),
 		Pick:        key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "projects")),
+		Move:        key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "move to project")),
 		Cycle:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next view")),
 		CycleRev:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev view")),
 		Reload:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload")),
@@ -286,6 +289,47 @@ func (m *uiModel) createProject(name string) error {
 	m.setProject(name)
 	m.persist(fmt.Sprintf("created project %q", name))
 	return nil
+}
+
+// moveTargets lists the namespaces the selected item could move to:
+// every project except the current one.
+func (m uiModel) moveTargets() []string {
+	names := m.projectNames()
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n != m.project {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// panelNames is the row set the overlay panel shows for the current
+// mode: all projects for the picker, the other projects for move.
+func (m uiModel) panelNames() []string {
+	if m.mode == modeMove {
+		return m.moveTargets()
+	}
+	return m.projectNames()
+}
+
+// moveSelectedTo relocates the item under the cursor into dest,
+// keeping its priority and done state, and saves immediately.
+func (m *uiModel) moveSelectedTo(dest string) {
+	it, ok := m.selected()
+	if !ok {
+		return
+	}
+	d := m.store.Project(dest)
+	if d == nil {
+		m.status = fmt.Sprintf("no such project %q", dest)
+		return
+	}
+	src := m.store.EnsureProject(m.project)
+	src.Items = append(src.Items[:it.row.fileIdx], src.Items[it.row.fileIdx+1:]...)
+	d.Items = append(d.Items, it.row.item)
+	m.items = src.Items
+	m.persist(fmt.Sprintf("moved %q to %q", it.row.item.Text, dest))
 }
 
 // switchProject moves the view to the delta-th next project, wrapping
@@ -468,6 +512,33 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// The move overlay works like the picker but lists only the other
+	// projects; enter relocates the item that was selected when it
+	// opened.
+	if m.mode == modeMove {
+		names := m.moveTargets()
+		switch keyName {
+		case "up", "k":
+			if m.pickerIdx > 0 {
+				m.pickerIdx--
+			}
+		case "down", "j":
+			if m.pickerIdx < len(names)-1 {
+				m.pickerIdx++
+			}
+		case "enter":
+			if m.pickerIdx < len(names) {
+				m.moveSelectedTo(names[m.pickerIdx])
+			}
+			m.mode = modeNormal
+			m.resizeList()
+		case "esc", "q":
+			m.mode = modeNormal
+			m.resizeList()
+		}
+		return m, nil
+	}
+
 	// While filtering, the list owns every key (typing, arrows, esc
 	// to clear).
 	if m.list.FilterState() != list.Unfiltered {
@@ -504,6 +575,20 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		m.resizeList()
+		return m, nil
+
+	case key.Matches(msg, m.keys.Move):
+		if _, ok := m.selected(); !ok {
+			m.status = "nothing selected to move"
+			return m, nil
+		}
+		if len(m.moveTargets()) == 0 {
+			m.status = "no other projects — press p to create one"
+			return m, nil
+		}
+		m.mode = modeMove
+		m.pickerIdx = 0
 		m.resizeList()
 		return m, nil
 
@@ -591,8 +676,8 @@ func (m *uiModel) resizeList() {
 	if m.help.ShowAll {
 		overhead = 9
 	}
-	if m.mode == modePicker || m.mode == modeNewProject {
-		overhead += len(m.projectNames()) + 6
+	if m.mode == modePicker || m.mode == modeNewProject || m.mode == modeMove {
+		overhead += len(m.panelNames()) + 6
 	}
 	h := m.height - overhead
 	if h < 1 {
@@ -604,7 +689,13 @@ func (m *uiModel) resizeList() {
 // pickerView renders the project panel: one row per namespace with
 // its pending count, a cursor, and key hints.
 func (m uiModel) pickerView() string {
-	names := m.projectNames()
+	names := m.panelNames()
+	title := "PROJECTS"
+	hintText := "enter select · n new · esc close"
+	if m.mode == modeMove {
+		title = "MOVE TO PROJECT"
+		hintText = "enter move · esc cancel"
+	}
 	nameW := 0
 	for _, n := range names {
 		if len(n) > nameW {
@@ -632,14 +723,14 @@ func (m uiModel) pickerView() string {
 		count := dimStyle().Render(fmt.Sprintf("%d pending", pending))
 		rows = append(rows, cursor+padded+"  "+count)
 	}
-	hint := dimStyle().Render("enter select · n new · esc close")
+	hint := dimStyle().Render(hintText)
 	panel := lipgloss.JoinVertical(lipgloss.Left, append(rows, hint)...)
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("244")).Render("PROJECTS")
+	styledTitle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("244")).Render(title)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Padding(0, 1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, title, panel))
+		Render(lipgloss.JoinVertical(lipgloss.Left, styledTitle, panel))
 }
 
 func (m uiModel) View() tea.View {
@@ -710,7 +801,7 @@ func (m uiModel) View() tea.View {
 	footer := m.help.View(m.keys)
 
 	parts := []string{header}
-	if m.mode == modePicker || m.mode == modeNewProject {
+	if m.mode == modePicker || m.mode == modeNewProject || m.mode == modeMove {
 		parts = append(parts, m.pickerView())
 	}
 	parts = append(parts, body)

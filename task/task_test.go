@@ -190,8 +190,8 @@ func TestStoreProjectMethods(t *testing.T) {
 }
 
 func TestValidateProjectName(t *testing.T) {
-	ok := []string{"work", "home-chores", "v2", "a1"}
-	bad := []string{"", " ", "two words", "tab\there", "trail "}
+	ok := []string{"work", "home-chores", "v2", "a1", "two words", "home chores"}
+	bad := []string{"", " ", "\t", "tab\there", "a\nb"}
 	for _, n := range ok {
 		if err := ValidateProjectName(n); err != nil {
 			t.Errorf("ValidateProjectName(%q) = %v, want nil", n, err)
