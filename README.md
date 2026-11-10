@@ -14,6 +14,8 @@ in one JSON file; configuration layers through CLI flags,
 - Interactive terminal UI (Bubble Tea) — browse, add, edit, toggle, filter
 - Projects as namespaces: `td project create gym`, then
   `td add -P gym "squat"`; every command targets one project (`-P`)
+- Move items between projects — `td move <n> <project>` or `m` in the
+  TUI — and manage projects full-screen with `p` (new, rename, delete)
 - Plain CLI subcommands for scripts; bare `td` piped to a file falls
   back to printing the pending list
 - Single binary (`td`), single JSON data file, atomic crash-safe writes
@@ -215,13 +217,13 @@ and never leave your machine via this repo.
 Run `td` with no arguments:
 
 ```
- td ─ [inbox] · pending (3) · all (8) · completed (5)
+ inbox 1/2  pending (3)  all (8)  completed (5)
  ▸  1.      urgent call
     2.  X   old task A
     3.      write blog
     add ▸ █
     added "buy milk"
-    a: add · enter: toggle done · e: edit · d: delete · 1/2/3: priority
+    a add · enter toggle done · e edit · d delete · m move to project · p projects · tab next view · / filter · q quit
 ```
 
 | Key          | Action                                              |
