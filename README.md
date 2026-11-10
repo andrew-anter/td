@@ -1,6 +1,7 @@
 # td
 
-A small, dependency-light command-line todo list written in Go. Tasks live
+A small todo list for the terminal written in Go: a full interactive TUI
+when run from a shell, plain scriptable commands when piped. Tasks live
 as a JSON array in one file; configuration layers through CLI flags,
 `TODO_`-prefixed environment variables, and a YAML config file.
 
@@ -9,22 +10,23 @@ as a JSON array in one file; configuration layers through CLI flags,
 
 ## Features
 
+- Interactive terminal UI (Bubble Tea) — browse, add, edit, toggle, filter
+- Plain CLI subcommands for scripts; bare `td` piped to a file falls
+  back to printing the pending list
 - Single binary (`td`), single JSON data file, atomic crash-safe writes
 - Inter-process locking — concurrent `td` commands never lose updates
 - Priority levels (1 high, 2 default, 3 low) with stable pending-first sorting
-- Item numbers are globally consistent: any number you see is directly
-  actionable by `complete`, `edit`, `reopen`, and `delete`
+- Item numbers are globally consistent: any number you see — in the TUI
+  or `td list` — is directly actionable by `complete`, `edit`, `reopen`,
+  and `delete`
 - Machine-readable output (`--json`, `--count`) for scripts and status bars
-- fzf picker + waybar module out of the box (optional integration scripts)
 - Bash / zsh / fish completions
 
 ## Requirements
 
-| Purpose          | Need                                        |
-| ---------------- | ------------------------------------------- |
-| Build & test     | Go ≥ 1.25                                   |
-| fzf integration  | `fzf`, `jq`, `gum`, `notify-send`           |
-| Waybar module    | waybar ≥ 0.9 (custom `exec` module)         |
+| Purpose      | Need          |
+| ------------ | ------------- |
+| Build & test | Go ≥ 1.25     |
 
 ## Build
 
@@ -38,7 +40,7 @@ go build -o td .    # or: make build
 make install
 ```
 
-Installs the binary, shell completions, and the fzf/waybar scripts:
+Installs the binary and shell completions:
 
 - binary: `~/.local/bin/td`
 - bash:   `~/.local/share/bash-completion/completions/td`
@@ -46,15 +48,13 @@ Installs the binary, shell completions, and the fzf/waybar scripts:
   `$fpath` *before* `compinit`, e.g.
   `fpath=(~/.local/share/zsh/site-functions $fpath)` in `.zshrc`
 - fish:   `~/.local/share/fish/vendor_completions.d/td.fish`
-- scripts: `~/.local/bin/td-{fzf,waybar,render,reload,cycle-view,act,add}`
 
-`make fzf-integration` installs only the scripts; `make uninstall` removes
-everything listed above.
+`make uninstall` removes everything listed above.
 
 ## Usage
 
 ```sh
-td                       # what you should be working on (pending, sorted)
+td                       # open the interactive TUI
 td add "buy milk"
 td add "write report" --priority 1
 td list                  # alias: ls — pending items
@@ -79,7 +79,9 @@ td delete --completed    # remove every completed task
 | `reopen <n>`      | `uncomplete` | Mark item `n` as pending (silent no-op if already pending).    |
 | `delete <n>`      | `rm`, `del`  | Delete item `n`, or with `--completed` delete every done item. |
 
-Running `td` with no subcommand is equivalent to `td list`.
+Running `td` with no subcommand opens the terminal UI (see below). When
+stdout is not a terminal — pipes, redirects, cron — bare `td` prints the
+pending list instead, exactly like `td list`.
 
 ### Flags
 
@@ -162,36 +164,61 @@ Two safety guarantees:
   renamed into place; a crash mid-write cannot corrupt the list.
 - **Locked mutations** — every mutating command holds an exclusive
   `flock` on a `<datafile>.lock` sidecar across its whole
-  read-modify-write cycle, so parallel `td` invocations (e.g. rapid
-  clicks in the fzf picker) cannot lose updates.
+  read-modify-write cycle, so parallel `td` invocations (e.g. a TUI
+  save racing a CLI save) cannot lose updates.
 
 The data file and its lock/config files are gitignored; they are yours
 and never leave your machine via this repo.
 
-## fzf / waybar integration
+## Terminal UI
 
-Scripts in `fzf/` turn `td` into a desktop workflow: waybar shows the
-pending count with a Nerd Font icon, and clicking it opens an fzf picker
-(enter toggles done, ctrl-d deletes, ctrl-a adds via gum, ctrl-t cycles
-pending → all → completed). The picker uses `--json` indices, so its
-numbers are actionable against the same global order.
+Run `td` with no arguments:
 
-```sh
-make fzf-integration    # or included in `make install`
+```
+ td ─ pending (3) · all (8) · completed (5)
+ ▸  1.      urgent call
+    2.  X   old task A
+    3.      write blog
+    add ▸ █
+    added "buy milk"
+    a: add · enter: toggle done · e: edit · d: delete · 1/2/3: priority
 ```
 
-Waybar config snippets, CSS, and full keybinding details:
-[`fzf/README.md`](fzf/README.md).
+| Key          | Action                                              |
+| ------------ | --------------------------------------------------- |
+| `j`/`k`, arrows | move cursor                                       |
+| `enter`/`space` | toggle the selected item done ↔ pending           |
+| `a`          | add a new task (enter commits, esc cancels)          |
+| `e`          | edit the selected item's text                        |
+| `d`          | delete the selected item                             |
+| `1` / `2` / `3` | set the selected item's priority                  |
+| `tab` / `shift+tab` | cycle views: pending → all → completed        |
+| `/`          | fuzzy-filter the current view; `esc` clears          |
+| `r`          | reload the data file from disk                       |
+| `?`          | toggle the full keymap                               |
+| `q`, `esc`, `ctrl+c` | quit                                         |
+
+Every mutation is locked and saved immediately, and the numbers shown are
+the same global numbers the CLI accepts — a row labeled `4.` in the
+completed view is `td delete 4` / `td reopen 4`. Because the TUI holds a
+full snapshot, changes made by *other* processes while the UI is open are
+picked up by pressing `r` (the last save wins).
+
+**Waybar / status bars:** for a count in any status bar, exec the CLI —
+e.g. waybar:
+
+```json
+"custom/td": { "exec": "td list --count | jq -r '.pending'", "interval": 30 }
+```
 
 ## Makefile
 
 | Target            | What it does                                          |
 | ----------------- | ----------------------------------------------------- |
 | `build`           | Compile `./td`                                          |
-| `run`             | `go run .`                                              |
+| `run`             | Launch the TUI via `go run .`                           |
 | `test` / `vet` / `fmt` / `tidy` | Go test, vet, format, module tidy         |
-| `install`         | Build, install binary + completions + fzf scripts       |
-| `fzf-integration` | Install only the fzf/waybar scripts to `~/.local/bin`   |
+| `install`         | Build, install binary + shell completions               |
 | `uninstall`       | Remove everything `install` placed                      |
 | `clean`           | Delete the local `td` binary                            |
 
@@ -200,7 +227,8 @@ Waybar config snippets, CSS, and full keybinding details:
 ```
 main.go              # entry point: calls cmd.Execute()
 cmd/                 # cobra commands (flag parsing, output, orchestration)
-  root.go            # root command, config bootstrap, data-file bootstrap
+  root.go            # root command: TUI launcher, CLI fallback, config bootstrap
+  ui.go              # the Bubble Tea terminal UI (views, keymap, delegate)
   add.go             # `add`
   list.go            # `list` / `ls`, shared runList + JSON/count modes
   complete.go        # `complete` / `c` / `comp`
@@ -211,14 +239,6 @@ cmd/                 # cobra commands (flag parsing, output, orchestration)
 task/                # domain types and persistence
   task.go            # Item, sort order, SaveItems, ReadItems
   lock.go            # advisory flock on a .lock sidecar (unix; no-op elsewhere)
-fzf/                 # fzf / waybar integration (see fzf/README.md)
-  td-waybar          # waybar exec — emits count + tooltip as JSON
-  td-fzf             # main fzf picker
-  td-render          # render the list for a view
-  td-reload          # re-render after an action
-  td-cycle-view      # bump the current view in the state file
-  td-act             # run an action + desktop notification
-  td-add             # gum prompt for adding a new task
 ```
 
 ## Tests

@@ -9,9 +9,12 @@ import (
 	"os"
 	"path/filepath"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"todo/task"
 )
 
 var cfgFile string
@@ -19,14 +22,37 @@ var cfgFile string
 var rootCmd = &cobra.Command{
 	Use:           "td",
 	Short:         "todo application to help me work on my goals.",
-	Long:          "With no arguments, prints pending todos (what you should be working on).",
+	Long:          "With no arguments, opens the interactive terminal UI (falls back to printing pending todos when stdout is not a terminal).",
 	RunE:          rootRun,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
 
+// rootRun opens the interactive terminal UI when stdout is a
+// terminal; otherwise (pipes, scripts, status bars) it degrades to
+// printing the pending list, so `td | something` keeps working.
 func rootRun(cmd *cobra.Command, args []string) error {
-	return runList(listOptions{})
+	if !isTerminal(os.Stdout) {
+		return runList(listOptions{})
+	}
+
+	path := viper.GetString("datafile")
+	items, err := task.ReadItems(path)
+	if err != nil {
+		return fmt.Errorf("failed to read items: %w", err)
+	}
+
+	p := tea.NewProgram(newUIModel(path, items))
+	_, err = p.Run()
+	return err
+}
+
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 func Execute() {
