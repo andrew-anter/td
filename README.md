@@ -244,16 +244,17 @@ Run `td` with no arguments:
 The project chip in the header shows which namespace the list, the
 numbers, and every mutation belong to — with a position counter (`2/4`)
 when more than one project exists. Press `p` for the full-page projects
-screen, where the same verbs keep their meaning: `a` creates a project,
-`e` renames the cursor's project, `d` deletes it (only once empty, so a
-keystroke can never destroy a list), and enter selects one and drops
-back to its tasks. Pressing `m` on an item opens the same screen as a
-destination picker. Every mutation is locked and saved immediately, and
-the numbers shown are the same per-project numbers the CLI accepts with
-the same `-P` — a row labeled `4.` in the completed view is `td delete 4`
-/ `td reopen 4` in that project. Because the TUI holds a full snapshot,
-changes made by *other* processes while the UI is open are picked up by
-pressing `r` (the last save wins).
+screen: the top bar becomes one tab per project and the same verbs keep
+their meaning — `a` creates a project, `e` renames the cursor's project,
+`d` deletes it (only once empty, so a keystroke can never destroy a
+list), and enter selects one and drops back to its tasks. Pressing `m`
+on an item opens the same screen as a destination picker. Every
+mutation is locked and saved immediately, and the numbers shown are the
+same per-project numbers the CLI accepts with the same `-P` — a row
+labeled `4.` in the completed view is `td delete 4` / `td reopen 4` in
+that project. Because the TUI holds a full snapshot, changes made by
+*other* processes while the UI is open are picked up by pressing `r`
+(the last save wins).
 
 **Waybar / status bars:** for a count in any status bar, exec the CLI —
 e.g. waybar (the `format` glyph is FA Free "hat-wizard", U+F6E8 — use

@@ -314,6 +314,32 @@ func TestMoveSelectedTo(t *testing.T) {
 	}
 }
 
+// The projects screen must fill the same vertical space as the task
+// list, so the context help sits at the bottom of the screen in both.
+func TestProjectsScreenPadsToBottom(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{
+		{Name: "inbox", Items: []task.Item{{Text: "milk", Priority: 2}}},
+		{Name: "td"},
+	}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	m.mode = modeProjects
+	projectsLines := strings.Count(m.View().Content, "\n")
+
+	m.mode = modeNormal
+	listLines := strings.Count(m.View().Content, "\n")
+
+	if projectsLines < 25 {
+		t.Errorf("projects screen only %d lines tall on a 30-line terminal — footer not pinned", projectsLines)
+	}
+	if projectsLines != listLines {
+		t.Errorf("projects screen %d lines, tasks screen %d — footers misaligned", projectsLines, listLines)
+	}
+}
+
 // After deleting the top pending item, the survivor is renumbered to
 // 1 and stays addressable in the same view.
 func TestVisibleRowsAfterDeleteRenumber(t *testing.T) {

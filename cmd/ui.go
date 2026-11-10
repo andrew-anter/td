@@ -718,9 +718,9 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// resizeList fits the list into the space below header, status/input
-// line, and help.
-func (m *uiModel) resizeList() {
+// contentHeight is the space left for the main body once header,
+// status/input line, and help are subtracted.
+func (m uiModel) contentHeight() int {
 	overhead := 4
 	if m.help.ShowAll {
 		overhead = 9
@@ -729,7 +729,13 @@ func (m *uiModel) resizeList() {
 	if h < 1 {
 		h = 1
 	}
-	m.list.SetSize(m.width, h)
+	return h
+}
+
+// resizeList fits the list into the space below header, status/input
+// line, and help.
+func (m *uiModel) resizeList() {
+	m.list.SetSize(m.width, m.contentHeight())
 }
 
 // projectsView renders the full-page projects screen: one row per
@@ -807,52 +813,76 @@ func (m uiModel) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
 
-	pending, done := 0, 0
-	for _, it := range m.items {
-		if it.Done {
-			done++
-		} else {
-			pending++
-		}
-	}
+	inProjects := m.mode == modeProjects || m.mode == modeNewProject || m.mode == modeRename
 
-	tabs := make([]string, 0, 3)
-	for _, vm := range []viewMode{viewPending, viewAll, viewDone} {
-		label := vm.label()
-		count := 0
-		switch vm {
-		case viewPending:
-			count = pending
-		case viewDone:
-			count = done
-		case viewAll:
-			count = len(m.items)
-		}
-		tab := fmt.Sprintf(" %s (%d) ", label, count)
-		if vm == m.view {
-			tab = activeTabStyle().Render(tab)
-		} else {
-			tab = tabStyle().Render(tab)
-		}
-		tabs = append(tabs, tab)
-	}
-	chipLabel := m.project
-	if names := m.projectNames(); len(names) > 1 {
+	var header string
+	if inProjects {
+		// On the projects screen the top bar itself becomes the
+		// project tabs: one per namespace, cursor highlighted.
+		names := m.panelNames()
+		ptabs := make([]string, 0, len(names))
 		for i, n := range names {
-			if n == m.project {
-				chipLabel = fmt.Sprintf("%s %d/%d", m.project, i+1, len(names))
-				break
+			tab := fmt.Sprintf(" %s ", n)
+			if i == m.pickerIdx {
+				tab = activeTabStyle().Render(tab)
+			} else {
+				tab = tabStyle().Render(tab)
+			}
+			ptabs = append(ptabs, tab)
+		}
+		header = lipgloss.JoinHorizontal(lipgloss.Left, ptabs...)
+	} else {
+		pending, done := 0, 0
+		for _, it := range m.items {
+			if it.Done {
+				done++
+			} else {
+				pending++
 			}
 		}
-	}
-	chip := projectStyle().Render(fmt.Sprintf(" %s ", chipLabel))
-	header := lipgloss.JoinHorizontal(lipgloss.Left, append([]string{chip}, tabs...)...)
 
-	inProjects := m.mode == modeProjects || m.mode == modeNewProject || m.mode == modeRename
+		tabs := make([]string, 0, 3)
+		for _, vm := range []viewMode{viewPending, viewAll, viewDone} {
+			label := vm.label()
+			count := 0
+			switch vm {
+			case viewPending:
+				count = pending
+			case viewDone:
+				count = done
+			case viewAll:
+				count = len(m.items)
+			}
+			tab := fmt.Sprintf(" %s (%d) ", label, count)
+			if vm == m.view {
+				tab = activeTabStyle().Render(tab)
+			} else {
+				tab = tabStyle().Render(tab)
+			}
+			tabs = append(tabs, tab)
+		}
+		chipLabel := m.project
+		if names := m.projectNames(); len(names) > 1 {
+			for i, n := range names {
+				if n == m.project {
+					chipLabel = fmt.Sprintf("%s %d/%d", m.project, i+1, len(names))
+					break
+				}
+			}
+		}
+		chip := projectStyle().Render(fmt.Sprintf(" %s ", chipLabel))
+		header = lipgloss.JoinHorizontal(lipgloss.Left, append([]string{chip}, tabs...)...)
+	}
 
 	body := m.list.View()
 	if inProjects {
-		body = m.projectsView()
+		// Pad to the content height (minus the blank spacer line)
+		// so the context help keeps its usual place at the bottom.
+		h := m.contentHeight() - 1
+		if h < 1 {
+			h = 1
+		}
+		body = lipgloss.NewStyle().Height(h).Render(m.projectsView())
 	}
 
 	var inputLine string
@@ -878,7 +908,11 @@ func (m uiModel) View() tea.View {
 		footer = m.help.View(m.keys)
 	}
 
-	parts := []string{header, body}
+	parts := []string{header}
+	if inProjects {
+		parts = append(parts, "") // breathing room under the tab bar
+	}
+	parts = append(parts, body)
 	if inputLine != "" {
 		parts = append(parts, inputLine)
 	}
