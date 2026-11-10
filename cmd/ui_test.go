@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"todo/task"
@@ -171,26 +172,29 @@ func TestPersistKeepsOtherProjects(t *testing.T) {
 	}
 }
 
-// createProject validates, adds, switches to, and persists a new
-// namespace; duplicates and invalid names are refused without
-// touching the store.
-func TestCreateProject(t *testing.T) {
+// createProjectInPlace validates, adds, and persists a new namespace
+// without leaving the projects screen or switching the active project;
+// duplicates and invalid names are refused.
+func TestCreateProjectInPlace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.json")
 	m := newUIModel(path, task.Store{}, task.DefaultProject)
 
-	if err := m.createProject("gym"); err != nil {
-		t.Fatalf("createProject: %v", err)
+	if err := m.createProjectInPlace("gym"); err != nil {
+		t.Fatalf("createProjectInPlace: %v", err)
 	}
-	if m.project != "gym" || m.status != `created project "gym"` {
-		t.Fatalf("after create: project=%q status=%q", m.project, m.status)
+	if m.project != task.DefaultProject {
+		t.Errorf("create must not switch the active project: %q", m.project)
 	}
-	if err := m.createProject("gym"); err == nil {
+	if m.status != `created project "gym"` || m.pickerIdx != 1 {
+		t.Errorf("after create: status=%q pickerIdx=%d", m.status, m.pickerIdx)
+	}
+	if err := m.createProjectInPlace("gym"); err == nil {
 		t.Errorf("expected duplicate project error")
 	}
-	if err := m.createProject("two words"); err != nil {
+	if err := m.createProjectInPlace("two words"); err != nil {
 		t.Errorf("names with spaces should be accepted: %v", err)
 	}
-	if err := m.createProject("tab\there"); err == nil {
+	if err := m.createProjectInPlace("tab\there"); err == nil {
 		t.Errorf("expected control character error")
 	}
 
@@ -201,6 +205,56 @@ func TestCreateProject(t *testing.T) {
 	names := got.ProjectNames()
 	if len(names) != 3 || names[0] != task.DefaultProject || names[1] != "gym" || names[2] != "two words" {
 		t.Errorf("persisted projects = %v, want [inbox gym two words]", names)
+	}
+}
+
+// renameProject keeps items and follows the view when the active
+// project is renamed; deleteProject refuses non-empty projects and
+// re-anchors the view when the active one goes.
+func TestRenameAndDeleteProject(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{
+		{Name: "work", Items: []task.Item{{Text: "keep", Priority: 2}}},
+		{Name: "empty"},
+	}}
+	m := newUIModel(path, store, "work")
+
+	m.renameTarget = "work"
+	if err := m.renameProject("job"); err != nil {
+		t.Fatalf("renameProject: %v", err)
+	}
+	if m.project != "job" {
+		t.Errorf("active project did not follow rename: %q", m.project)
+	}
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	if got.Project("work") != nil {
+		t.Errorf("old name persisted")
+	}
+	if p := got.Project("job"); p == nil || len(p.Items) != 1 || p.Items[0].Text != "keep" {
+		t.Errorf("rename lost items: %+v", p)
+	}
+
+	// d on a non-empty project refuses.
+	m.deleteProject("job")
+	if got2, _ := task.ReadStore(path); got2.Project("job") == nil {
+		t.Errorf("non-empty project was deleted without force")
+	}
+	if !strings.Contains(m.status, "has 1 item") {
+		t.Errorf("status = %q, want refusal with item count", m.status)
+	}
+
+	// d on the empty active project removes it and re-anchors.
+	m.setProject("empty")
+	m.deleteProject("empty")
+	if m.project != "job" {
+		t.Errorf("after deleting active project, view = %q, want job", m.project)
+	}
+	got3, _ := task.ReadStore(path)
+	if got3.Project("empty") != nil {
+		t.Errorf("empty project persisted after delete")
 	}
 }
 
