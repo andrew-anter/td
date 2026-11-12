@@ -166,7 +166,33 @@ const (
 	modeNewProject // textinput for a new project name
 	modeRename     // textinput renaming a project
 	modeDetail     // full read-only view of the focused task
+	modeConfirm    // delete awaiting y/n
 )
+
+// deleteKind selects the object a modeConfirm prompt will remove.
+type deleteKind int
+
+const (
+	deleteTask deleteKind = iota
+	deleteProject
+)
+
+// pendingDelete is the destructive action held behind modeConfirm.
+// The label is captured when the prompt opens so the text cannot drift
+// while the answer is pending.
+type pendingDelete struct {
+	kind    deleteKind
+	fileIdx int
+	project string
+	label   string
+}
+
+func (p pendingDelete) prompt() string {
+	if p.kind == deleteProject {
+		return fmt.Sprintf("delete project %q? y confirm · n cancel", p.project)
+	}
+	return fmt.Sprintf("delete %q? y confirm · n cancel", p.label)
+}
 
 type uiKeys struct {
 	Quit         key.Binding
@@ -238,6 +264,8 @@ type uiModel struct {
 	mode inputMode
 	// editingFileIdx is the file index being edited in modeEdit.
 	editingFileIdx int
+	// confirm holds the delete waiting behind modeConfirm.
+	confirm *pendingDelete
 	// describeLoaded holds what the D field was opened with, so an
 	// untouched commit cannot flatten a description that still has
 	// paragraph breaks stored by the external editor.
@@ -546,6 +574,39 @@ func (m uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	keyName := msg.String()
 
+	// A delete confirmation owns the keyboard: only y answers it.
+	// Every other key, including navigation, is ignored so a stray
+	// keystroke cannot act on the list mid-prompt; ctrl+c still
+	// force-quits.
+	if m.mode == modeConfirm && m.confirm != nil {
+		pd := m.confirm
+		switch keyName {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "y", "Y":
+			m.confirm = nil
+			if pd.kind == deleteProject {
+				m.mode = modeProjects
+				m.deleteProject(pd.project)
+			} else {
+				m.mode = modeNormal
+				if pd.fileIdx >= 0 && pd.fileIdx < len(m.items) {
+					m.items = deleteItem(m.items, pd.fileIdx)
+					m.persist(fmt.Sprintf("deleted %q", pd.label))
+				}
+			}
+		case "n", "N", "esc", "q":
+			m.confirm = nil
+			m.status = "delete cancelled"
+			if pd.kind == deleteProject {
+				m.mode = modeProjects
+			} else {
+				m.mode = modeNormal
+			}
+		}
+		return m, nil
+	}
+
 	// Input modes own the keyboard: enter commits, esc drops to
 	// NORMAL, and a second esc cancels.
 	if m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename {
@@ -654,7 +715,9 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		case "d":
 			if !m.projectsForMove && m.pickerIdx < len(names) {
-				m.deleteProject(names[m.pickerIdx])
+				name := names[m.pickerIdx]
+				m.confirm = &pendingDelete{kind: deleteProject, project: name}
+				m.mode = modeConfirm
 			}
 		case "esc", "q", "p":
 			m.mode = modeNormal
@@ -673,12 +736,19 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// While filtering, the list owns every key (typing, arrows, esc
-	// to clear).
-	if m.list.FilterState() != list.Unfiltered {
+	// While the filter input is open the list owns every key (typing,
+	// arrows, esc to cancel). An applied filter only narrows the rows:
+	// task verbs below still act on them, and esc clears the filter
+	// instead of falling through to the quit binding.
+	if m.list.FilterState() == list.Filtering {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
 		return m, cmd
+	}
+	if m.list.FilterState() == list.FilterApplied && key.Matches(msg, m.list.KeyMap.ClearFilter) {
+		m.list.ResetFilter()
+		m.status = "filter cleared"
+		return m, nil
 	}
 
 	switch {
@@ -821,8 +891,8 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Delete):
 		if it, ok := m.selected(); ok {
-			m.items = deleteItem(m.items, it.row.fileIdx)
-			m.persist(fmt.Sprintf("deleted %q", it.row.item.Text))
+			m.confirm = &pendingDelete{kind: deleteTask, fileIdx: it.row.fileIdx, label: it.row.item.Text}
+			m.mode = modeConfirm
 		}
 		return m, nil
 
@@ -966,6 +1036,19 @@ func (p projectsKeys) ShortHelp() []key.Binding {
 
 func (p projectsKeys) FullHelp() [][]key.Binding { return [][]key.Binding{p.ShortHelp()} }
 
+// confirmKeys is the context help while a delete waits for an answer;
+// the prompt itself names what will be removed.
+type confirmKeys struct{}
+
+func (confirmKeys) ShortHelp() []key.Binding {
+	return []key.Binding{
+		key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "confirm delete")),
+		key.NewBinding(key.WithKeys("n", "esc"), key.WithHelp("n/esc", "cancel")),
+	}
+}
+
+func (confirmKeys) FullHelp() [][]key.Binding { return [][]key.Binding{confirmKeys{}.ShortHelp()} }
+
 // detailView renders the focused task in full: the whole text and
 // description wrapped to the screen — the rows only abbreviate — plus
 // the metadata and the CLI handles for the same item.
@@ -1037,7 +1120,8 @@ func (m uiModel) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
 
-	inProjects := m.mode == modeProjects || m.mode == modeNewProject || m.mode == modeRename
+	inProjects := m.mode == modeProjects || m.mode == modeNewProject || m.mode == modeRename ||
+		(m.mode == modeConfirm && m.confirm != nil && m.confirm.kind == deleteProject)
 
 	var header string
 	if !inProjects {
@@ -1108,6 +1192,12 @@ func (m uiModel) View() tea.View {
 		block, h := m.input.EditView(avail, max(1, maxLines))
 		inputLine = lipgloss.JoinHorizontal(lipgloss.Top, prefix, block)
 		inputH = h
+	} else if m.mode == modeConfirm && m.confirm != nil {
+		text := m.confirm.prompt()
+		if m.width > 0 {
+			text = fitCells(text, m.width)
+		}
+		inputLine = statusStyle(m.isDark).Render(text)
 	} else if m.status != "" {
 		text := m.status
 		if m.width > 0 {
@@ -1134,6 +1224,8 @@ func (m uiModel) View() tea.View {
 	switch {
 	case inInput:
 		footer = m.help.View(vimInputKeys{insert: m.input.state == vimInsert})
+	case m.mode == modeConfirm:
+		footer = m.help.View(confirmKeys{})
 	case inProjects:
 		footer = m.help.View(projectsKeys{moving: m.projectsForMove})
 	case m.mode == modeDetail:

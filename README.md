@@ -12,6 +12,8 @@ in one JSON file; configuration layers through CLI flags,
 ## Features
 
 - Interactive terminal UI (Bubble Tea) — browse, add, edit, toggle, filter
+- Destructive keys ask first: deleting a task or project needs `y` to
+  confirm, `n`/`esc` cancels — no accidental loss
 - Vim-style modal editing in every text field — `esc` toggles
   NORMAL/INSERT; motions, finds, and `d`/`c`/`x`/`s`/`r` operators with
   counts (see [Terminal UI](#terminal-ui))
@@ -265,10 +267,10 @@ show `-` so the columns stay aligned.
 | `e`          | edit the selected item's text                        |
 | `E`          | edit title + description in `$EDITOR` (git-style buffer: title first line, then description after a blank line) |
 | `D`          | edit the selected item's description (same editor; empty commit clears it) |
-| `d`          | delete the selected item                             |
+| `d`          | delete the selected item (`y` confirms, `n`/`esc` cancels) |
 | `1` / `2` / `3` | set the selected item's priority                  |
 | `m`          | move the selected item to another project (opens the projects screen; enter picks the destination) |
-| `p`          | projects screen: enter select, `a` new, `e` rename, `d` delete (empty only), esc back |
+| `p`          | projects screen: enter select, `a` new, `e` rename, `d` delete (empty only, `y` confirms), esc back |
 | `[` / `]`    | switch to the previous / next project                |
 | `tab` / `shift+tab` | cycle views: pending → all → completed        |
 | `/`          | fuzzy-filter the current view; `esc` clears          |

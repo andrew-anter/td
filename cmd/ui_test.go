@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/list"
 	"charm.land/lipgloss/v2"
 
 	"todo/task"
@@ -701,5 +702,161 @@ func TestDetailViewShowsFullTextAndMetadata(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Errorf("detail view missing %q", want)
 		}
+	}
+}
+
+// An applied filter narrows the rows but must not become a modal input:
+// task verbs still act on the visible selection.
+func TestAppliedFilterKeepsTaskVerbsLive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "milk", Priority: 2},
+		{Text: "bread", Priority: 2},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	m.list.SetFilterText("milk")
+	if m.list.FilterState() != list.FilterApplied {
+		t.Fatalf("FilterState = %v, want FilterApplied", m.list.FilterState())
+	}
+
+	pressKeys(&m, []string{"x"})
+	if !m.items[0].Done {
+		t.Fatalf("x under an applied filter did not complete the selected task")
+	}
+	if m.items[1].Done {
+		t.Errorf("x toggled a task outside the filter")
+	}
+}
+
+// esc clears an applied filter; it must not fall through to the app's
+// quit binding.
+func TestEscClearsAppliedFilterInsteadOfQuitting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "milk", Priority: 2},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	m.list.SetFilterText("milk")
+	updated, cmd := m.handleKey(keyMsg("esc"))
+	m = updated.(uiModel)
+
+	if m.list.FilterState() != list.Unfiltered {
+		t.Fatalf("esc left FilterState = %v, want Unfiltered", m.list.FilterState())
+	}
+	if cmd != nil {
+		t.Errorf("esc under an applied filter returned a command, want a cleared filter")
+	}
+}
+
+// d must not destroy a task outright: the prompt names the target, n
+// and esc cancel, and only y commits the delete.
+func TestDeleteTaskWaitsForConfirmation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "milk", Priority: 2},
+		{Text: "bread", Priority: 2},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	pressKeys(&m, []string{"d"})
+	if m.mode != modeConfirm || m.confirm == nil {
+		t.Fatalf("d opened mode %v, want a confirmation prompt", m.mode)
+	}
+	if len(m.items) != 2 {
+		t.Fatalf("d deleted before confirmation: %d items left", len(m.items))
+	}
+	content := m.View().Content
+	if !strings.Contains(content, `delete "milk"?`) {
+		t.Errorf("prompt does not name the task:\n%s", content)
+	}
+	if !strings.Contains(content, "confirm delete") || !strings.Contains(content, "cancel") {
+		t.Errorf("footer does not offer confirm/cancel:\n%s", content)
+	}
+
+	// A stray verb while the prompt is open changes nothing.
+	pressKeys(&m, []string{"x"})
+	if len(m.items) != 2 || m.mode != modeConfirm {
+		t.Fatalf("key during confirmation mutated state: mode=%v items=%d", m.mode, len(m.items))
+	}
+
+	pressKeys(&m, []string{"n"})
+	if m.mode != modeNormal || len(m.items) != 2 {
+		t.Fatalf("n did not cancel: mode=%v items=%d", m.mode, len(m.items))
+	}
+	if m.status != "delete cancelled" {
+		t.Errorf("status = %q, want cancel message", m.status)
+	}
+
+	pressKeys(&m, []string{"d", "esc"})
+	if m.mode != modeNormal || len(m.items) != 2 {
+		t.Fatalf("esc did not cancel: mode=%v items=%d", m.mode, len(m.items))
+	}
+
+	pressKeys(&m, []string{"d", "y"})
+	if m.mode != modeNormal || len(m.items) != 1 || m.items[0].Text != "bread" {
+		t.Fatalf("y did not delete the target: mode=%v items=%+v", m.mode, m.items)
+	}
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	if p := got.Project("inbox"); p == nil || len(p.Items) != 1 || p.Items[0].Text != "bread" {
+		t.Errorf("deletion did not persist: %+v", got)
+	}
+}
+
+// Project deletion follows the same rule: d asks, and the projects
+// screen stays behind the prompt.
+func TestDeleteProjectWaitsForConfirmation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{
+		{Name: "inbox", Items: []task.Item{{Text: "keep", Priority: 2}}},
+		{Name: "scratch"},
+	}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	pressKeys(&m, []string{"p", "j", "d"})
+	if m.mode != modeConfirm || m.confirm == nil {
+		t.Fatalf("d opened mode %v, want a confirmation prompt", m.mode)
+	}
+	if m.store.Project("scratch") == nil {
+		t.Fatal("project deleted before confirmation")
+	}
+	content := m.View().Content
+	if !strings.Contains(content, `delete project "scratch"?`) {
+		t.Errorf("prompt does not name the project:\n%s", content)
+	}
+	if !strings.Contains(content, "scratch") || !strings.Contains(content, "pending") {
+		t.Errorf("projects screen hidden behind the prompt:\n%s", content)
+	}
+
+	pressKeys(&m, []string{"n"})
+	if m.mode != modeProjects || m.store.Project("scratch") == nil {
+		t.Fatalf("n left mode=%v, project present=%v", m.mode, m.store.Project("scratch") != nil)
+	}
+
+	pressKeys(&m, []string{"d", "y"})
+	if m.mode != modeProjects || m.store.Project("scratch") != nil {
+		t.Fatalf("y left mode=%v, project present=%v", m.mode, m.store.Project("scratch") != nil)
+	}
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	if got.Project("scratch") != nil {
+		t.Errorf("project deletion did not persist: %+v", got)
+	}
+	if got.Project("inbox") == nil {
+		t.Errorf("confirmation deleted the wrong project: %+v", got)
 	}
 }
