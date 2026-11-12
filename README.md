@@ -247,7 +247,7 @@ Run `td` with no arguments:
       3. X    (3) 2026-11-11 2026-11-12 write blog
     add  ❯ █
     added "buy milk"
-    a add · enter toggle done · e edit · d delete · m move to project · p projects · tab next view · / filter · q quit
+    a add · enter details · x toggle done · e edit · d delete · m move to project · p projects · tab next view · / filter · q quit
 ```
 
 Rows are fixed-width under a header line: number, done marker,
@@ -259,7 +259,8 @@ show `-` so the columns stay aligned.
 | Key          | Action                                              |
 | ------------ | --------------------------------------------------- |
 | `j`/`k`, arrows | move cursor                                       |
-| `enter`/`space` | toggle the selected item done ↔ pending           |
+| `enter`       | open the detail screen for the focused task (`enter`/`esc`/`q` back) |
+| `x`/`space` | toggle the selected item done ↔ pending           |
 | `a`          | add a new task (enter commits; `esc` drops to NORMAL, `esc` again cancels) |
 | `e`          | edit the selected item's text                        |
 | `E`          | edit title + description in `$EDITOR` (git-style buffer: title first line, then description after a blank line) |
@@ -274,6 +275,16 @@ show `-` so the columns stay aligned.
 | `r`          | reload the data file from disk                       |
 | `?`          | toggle the full keymap                               |
 | `q`, `esc`, `ctrl+c` | quit                                         |
+
+### Task details
+
+`enter` opens the focused task full-screen: the complete text and
+description, word-wrapped to the terminal — no truncation, no matter
+how long the task is — plus the project, the CLI number (`td complete
+N -P project` addresses the same item), status, priority, and the
+created/completed dates. `enter`, `esc`, or `q` closes it; every other
+verb acts on the detailed task and drops back to the list — so `x`
+completes what you are reading without leaving the screen first.
 
 ### Text fields: vim editing
 

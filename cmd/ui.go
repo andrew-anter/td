@@ -165,10 +165,12 @@ const (
 	modeProjects   // full-page projects screen (p to manage, m to pick a move target)
 	modeNewProject // textinput for a new project name
 	modeRename     // textinput renaming a project
+	modeDetail     // full read-only view of the focused task
 )
 
 type uiKeys struct {
 	Quit         key.Binding
+	Detail       key.Binding
 	Toggle       key.Binding
 	Add          key.Binding
 	Edit         key.Binding
@@ -190,12 +192,12 @@ type uiKeys struct {
 }
 
 func (k uiKeys) ShortHelp() []key.Binding {
-	return []key.Binding{k.Add, k.Toggle, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Move, k.Pick, k.Cycle, k.Filter, k.Quit}
+	return []key.Binding{k.Add, k.Detail, k.Toggle, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Move, k.Pick, k.Cycle, k.Filter, k.Quit}
 }
 
 func (k uiKeys) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Add, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Toggle},
+		{k.Add, k.Detail, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Toggle},
 		{k.Pri1, k.Pri2, k.Pri3, k.Move, k.Pick, k.PrevProject, k.NextProject},
 		{k.Cycle, k.CycleRev, k.Filter, k.Reload, k.Help, k.Quit},
 	}
@@ -204,7 +206,8 @@ func (k uiKeys) FullHelp() [][]key.Binding {
 func newUIKeys() uiKeys {
 	return uiKeys{
 		Quit:         key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
-		Toggle:       key.NewBinding(key.WithKeys("enter", "space"), key.WithHelp("enter", "toggle done")),
+		Detail:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "details")),
+		Toggle:       key.NewBinding(key.WithKeys("x", "space"), key.WithHelp("x", "toggle done")),
 		Add:          key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 		Edit:         key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 		EditExternal: key.NewBinding(key.WithKeys("E"), key.WithHelp("E", "edit in $EDITOR")),
@@ -660,6 +663,16 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// The detail screen is a viewer: enter, esc, and q close it; any
+	// other key closes it first and then acts on the list below, so
+	// the verb hits the very task that was being read.
+	if m.mode == modeDetail {
+		m.mode = modeNormal
+		if keyName == "enter" || keyName == "esc" || keyName == "q" {
+			return m, nil
+		}
+	}
+
 	// While filtering, the list owns every key (typing, arrows, esc
 	// to clear).
 	if m.list.FilterState() != list.Unfiltered {
@@ -788,6 +801,12 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(run, func(err error) tea.Msg {
 			return editTaskFinishedMsg{err: err, path: path, fileIdx: it.row.fileIdx}
 		})
+
+	case keyName == "enter":
+		if _, ok := m.selected(); ok {
+			m.mode = modeDetail
+		}
+		return m, nil
 
 	case key.Matches(msg, m.keys.Toggle):
 		if it, ok := m.selected(); ok {
@@ -947,6 +966,73 @@ func (p projectsKeys) ShortHelp() []key.Binding {
 
 func (p projectsKeys) FullHelp() [][]key.Binding { return [][]key.Binding{p.ShortHelp()} }
 
+// detailView renders the focused task in full: the whole text and
+// description wrapped to the screen — the rows only abbreviate — plus
+// the metadata and the CLI handles for the same item.
+func (m uiModel) detailView() string {
+	it, ok := m.selected()
+	if !ok {
+		return ""
+	}
+	item := it.row.item
+	w := max(30, m.width-10)
+	wrap := lipgloss.NewStyle().Width(w)
+
+	lines := []string{lipgloss.NewStyle().Bold(true).Width(w).Render(item.Text)}
+	if desc := strings.TrimRight(item.Description, "\n"); desc != "" {
+		lines = append(lines, "", dimStyle().Render("description"))
+		for _, para := range strings.Split(desc, "\n") {
+			if strings.TrimSpace(para) == "" {
+				lines = append(lines, "")
+				continue
+			}
+			lines = append(lines, wrap.Render(para))
+		}
+	}
+	status := "pending"
+	if item.Done {
+		status = "done"
+	}
+	pri := "medium"
+	switch item.Priority {
+	case 1:
+		pri = "high"
+	case 3:
+		pri = "low"
+	}
+	meta := [][2]string{
+		{"project", m.project},
+		{"number", fmt.Sprintf("%d — td complete %d -P %s", it.row.num, it.row.num, m.project)},
+		{"status", status},
+		{"priority", fmt.Sprintf("%d (%s)", item.Priority, pri)},
+		{"created", item.PrettyCreated()},
+		{"completed", item.PrettyCompleted()},
+	}
+	lines = append(lines, "")
+	for _, kv := range meta {
+		lines = append(lines, dimStyle().Render(fmt.Sprintf("%-10s", kv[0]))+kv[1])
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// detailKeys is the context help shown while the detail screen is
+// open; the verbs act on the detailed task and drop back to the list.
+type detailKeys struct{ keys uiKeys }
+
+func (d detailKeys) ShortHelp() []key.Binding {
+	return []key.Binding{
+		key.NewBinding(key.WithKeys("enter", "esc", "q"), key.WithHelp("enter", "back")),
+		d.keys.Toggle, d.keys.Edit, d.keys.EditExternal, d.keys.Describe, d.keys.Delete, d.keys.Move,
+	}
+}
+
+func (d detailKeys) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		d.ShortHelp(),
+		{d.keys.Pri1, d.keys.Pri2, d.keys.Pri3, d.keys.Pick, d.keys.Reload},
+	}
+}
+
 func (m uiModel) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
@@ -1039,6 +1125,9 @@ func (m uiModel) View() tea.View {
 		// total height (and thus the footer position) matches the
 		// task list.
 		body = lipgloss.NewStyle().Height(bodyH + 2).Render(m.projectsView())
+	} else if m.mode == modeDetail {
+		body = lipgloss.NewStyle().Height(bodyH+2).MaxHeight(bodyH+2).
+			Padding(0, 2).Render(m.detailView())
 	}
 
 	var footer string
@@ -1047,6 +1136,8 @@ func (m uiModel) View() tea.View {
 		footer = m.help.View(vimInputKeys{insert: m.input.state == vimInsert})
 	case inProjects:
 		footer = m.help.View(projectsKeys{moving: m.projectsForMove})
+	case m.mode == modeDetail:
+		footer = m.help.View(detailKeys{keys: m.keys})
 	default:
 		footer = m.help.View(m.keys)
 	}

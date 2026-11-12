@@ -620,3 +620,86 @@ func TestUIEditorMissingReportsStatus(t *testing.T) {
 		t.Fatalf("status = %q, want a clear missing-editor hint", m.status)
 	}
 }
+
+func TestEnterOpensDetailXCompletes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "milk", Priority: 2},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	pressKeys(&m, []string{"enter"})
+	if m.mode != modeDetail {
+		t.Fatalf("enter opened mode %v, want detail", m.mode)
+	}
+
+	// x completes from the detail screen and drops back to the list.
+	pressKeys(&m, []string{"x"})
+	if m.mode != modeNormal {
+		t.Errorf("x left mode %v, want normal", m.mode)
+	}
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	if !got.Projects[0].Items[0].Done {
+		t.Errorf("x did not complete the item: %+v", got)
+	}
+
+	pressKeys(&m, []string{"enter", "esc"})
+	if m.mode != modeNormal {
+		t.Errorf("esc left mode %v, want normal", m.mode)
+	}
+
+	// q closes the detail screen instead of quitting the app. The
+	// completed row only shows again on the all view.
+	pressKeys(&m, []string{"tab"})
+	updated, _ := m.handleKey(keyMsg("enter"))
+	m = updated.(uiModel)
+	updated, cmd := m.handleKey(keyMsg("q"))
+	m = updated.(uiModel)
+	if m.mode != modeNormal {
+		t.Errorf("q left mode %v, want normal", m.mode)
+	}
+	if cmd != nil {
+		t.Errorf("q in detail returned a command, want back-not-quit")
+	}
+
+	// Empty list: enter opens nothing.
+	e := newUIModel(filepath.Join(t.TempDir(), "empty.json"), task.Store{}, "inbox")
+	updated, _ = e.handleKey(keyMsg("enter"))
+	if updated.(uiModel).mode != modeNormal {
+		t.Errorf("enter on empty list opened a detail screen")
+	}
+}
+
+func TestDetailViewShowsFullTextAndMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	long := strings.Repeat("alpha bravo charlie ", 8) + "ZULU-ENDING"
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: long, Description: "first paragraph tail-one\n\nsecond paragraph tail-two", Priority: 1},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 40
+	(&m).resizeList()
+	pressKeys(&m, []string{"enter"})
+
+	content := m.View().Content
+	body := m.detailView()
+	if !strings.Contains(body, "ZULU-ENDING") {
+		t.Errorf("detail body did not show the full text tail")
+	}
+	if strings.Contains(body, "…") {
+		t.Errorf("detail body ellipsized long text")
+	}
+	if !strings.Contains(content, "second paragraph tail-two") {
+		t.Errorf("detail view lost the description's second paragraph")
+	}
+	for _, want := range []string{"high", "td complete 1 -P inbox", "pending"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("detail view missing %q", want)
+		}
+	}
+}
