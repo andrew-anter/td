@@ -6,6 +6,8 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -166,33 +168,34 @@ const (
 )
 
 type uiKeys struct {
-	Quit        key.Binding
-	Toggle      key.Binding
-	Add         key.Binding
-	Edit        key.Binding
-	Describe    key.Binding
-	Delete      key.Binding
-	Pri1        key.Binding
-	Pri2        key.Binding
-	Pri3        key.Binding
-	PrevProject key.Binding
-	NextProject key.Binding
-	Pick        key.Binding
-	Move        key.Binding
-	Cycle       key.Binding
-	CycleRev    key.Binding
-	Reload      key.Binding
-	Filter      key.Binding
-	Help        key.Binding
+	Quit         key.Binding
+	Toggle       key.Binding
+	Add          key.Binding
+	Edit         key.Binding
+	EditExternal key.Binding
+	Describe     key.Binding
+	Delete       key.Binding
+	Pri1         key.Binding
+	Pri2         key.Binding
+	Pri3         key.Binding
+	PrevProject  key.Binding
+	NextProject  key.Binding
+	Pick         key.Binding
+	Move         key.Binding
+	Cycle        key.Binding
+	CycleRev     key.Binding
+	Reload       key.Binding
+	Filter       key.Binding
+	Help         key.Binding
 }
 
 func (k uiKeys) ShortHelp() []key.Binding {
-	return []key.Binding{k.Add, k.Toggle, k.Edit, k.Delete, k.Move, k.Pick, k.Cycle, k.Filter, k.Quit}
+	return []key.Binding{k.Add, k.Toggle, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Move, k.Pick, k.Cycle, k.Filter, k.Quit}
 }
 
 func (k uiKeys) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Add, k.Edit, k.Describe, k.Delete, k.Toggle},
+		{k.Add, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Toggle},
 		{k.Pri1, k.Pri2, k.Pri3, k.Move, k.Pick, k.PrevProject, k.NextProject},
 		{k.Cycle, k.CycleRev, k.Filter, k.Reload, k.Help, k.Quit},
 	}
@@ -200,24 +203,25 @@ func (k uiKeys) FullHelp() [][]key.Binding {
 
 func newUIKeys() uiKeys {
 	return uiKeys{
-		Quit:        key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
-		Toggle:      key.NewBinding(key.WithKeys("enter", "space"), key.WithHelp("enter", "toggle done")),
-		Add:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
-		Edit:        key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
-		Describe:    key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "describe")),
-		Delete:      key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
-		Pri1:        key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "high pri")),
-		Pri2:        key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "med pri")),
-		Pri3:        key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "low pri")),
-		PrevProject: key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev project")),
-		NextProject: key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next project")),
-		Pick:        key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "projects")),
-		Move:        key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "move to project")),
-		Cycle:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next view")),
-		CycleRev:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev view")),
-		Reload:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload")),
-		Filter:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
-		Help:        key.NewBinding(key.WithKeys("?", "f1"), key.WithHelp("?", "help")),
+		Quit:         key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
+		Toggle:       key.NewBinding(key.WithKeys("enter", "space"), key.WithHelp("enter", "toggle done")),
+		Add:          key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
+		Edit:         key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
+		EditExternal: key.NewBinding(key.WithKeys("E"), key.WithHelp("E", "edit in $EDITOR")),
+		Describe:     key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "describe")),
+		Delete:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+		Pri1:         key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "high pri")),
+		Pri2:         key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "med pri")),
+		Pri3:         key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "low pri")),
+		PrevProject:  key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev project")),
+		NextProject:  key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next project")),
+		Pick:         key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "projects")),
+		Move:         key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "move to project")),
+		Cycle:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next view")),
+		CycleRev:     key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev view")),
+		Reload:       key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload")),
+		Filter:       key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		Help:         key.NewBinding(key.WithKeys("?", "f1"), key.WithHelp("?", "help")),
 	}
 }
 
@@ -231,6 +235,10 @@ type uiModel struct {
 	mode inputMode
 	// editingFileIdx is the file index being edited in modeEdit.
 	editingFileIdx int
+	// describeLoaded holds what the D field was opened with, so an
+	// untouched commit cannot flatten a description that still has
+	// paragraph breaks stored by the external editor.
+	describeLoaded string
 	// pickerIdx is the cursor row on the projects screen.
 	pickerIdx int
 	// projectsForMove marks the projects screen opened by m (pick a
@@ -482,12 +490,39 @@ func (m uiModel) selected() (uiItem, bool) {
 	return it, ok
 }
 
+// editTaskFinishedMsg arrives when the $EDITOR spawned by E exits.
+type editTaskFinishedMsg struct {
+	err     error
+	path    string
+	fileIdx int
+}
+
 func (m uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetWidth(msg.Width)
 		m.resizeList()
+		return m, nil
+
+	case editTaskFinishedMsg:
+		defer os.Remove(msg.path)
+		if msg.fileIdx < 0 || msg.fileIdx >= len(m.items) {
+			return m, nil
+		}
+		raw, readErr := os.ReadFile(msg.path)
+		if msg.err != nil || readErr != nil {
+			m.refresh("edit cancelled")
+			return m, nil
+		}
+		title, desc := parseTaskBuffer(string(raw))
+		if title == "" {
+			m.refresh("empty title — edit aborted")
+			return m, nil
+		}
+		m.items[msg.fileIdx].Text = title
+		m.items[msg.fileIdx].Description = desc
+		m.persist(fmt.Sprintf("edited %q", title))
 		return m, nil
 
 	case tea.BackgroundColorMsg:
@@ -542,11 +577,15 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					m.items[m.editingFileIdx].Text = text
 					m.persist(fmt.Sprintf("edited %q", text))
 				case m.mode == modeDescribe && m.editingFileIdx >= 0 && m.editingFileIdx < len(m.items):
-					m.items[m.editingFileIdx].Description = text
-					if text == "" {
-						m.persist("description cleared")
+					if text == m.describeLoaded && m.items[m.editingFileIdx].Description != text {
+						m.refresh("description unchanged")
 					} else {
-						m.persist(fmt.Sprintf("described %q", m.items[m.editingFileIdx].Text))
+						m.items[m.editingFileIdx].Description = text
+						if text == "" {
+							m.persist("description cleared")
+						} else {
+							m.persist(fmt.Sprintf("described %q", m.items[m.editingFileIdx].Text))
+						}
 					}
 				default:
 					m.refresh("cancelled")
@@ -721,10 +760,29 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.editingFileIdx = it.row.fileIdx
 			m.input.SetValue(it.row.item.Description)
 			m.input.Enter()
+			m.describeLoaded = strings.TrimSpace(m.input.Value())
 			m.input.Placeholder = "description"
 			m.input.Focus()
 		}
 		return m, nil
+
+	case key.Matches(msg, m.keys.EditExternal):
+		it, ok := m.selected()
+		if !ok {
+			return m, nil
+		}
+		f, err := os.CreateTemp("", "td-task-*.md")
+		if err != nil {
+			m.refresh("temp file: " + err.Error())
+			return m, nil
+		}
+		_, _ = fmt.Fprint(f, taskBuffer(it.row.item.Text, it.row.item.Description))
+		_ = f.Close()
+		path := f.Name()
+		run := exec.Command("sh", "-c", externalEditor()+" \"$1\"", "td", path)
+		return m, tea.ExecProcess(run, func(err error) tea.Msg {
+			return editTaskFinishedMsg{err: err, path: path, fileIdx: it.row.fileIdx}
+		})
 
 	case key.Matches(msg, m.keys.Toggle):
 		if it, ok := m.selected(); ok {
@@ -782,7 +840,8 @@ func (m uiModel) previewLine() string {
 	if !ok || it.row.item.Description == "" {
 		return ""
 	}
-	text := it.row.item.Description
+	// The preview is one terminal line: paragraph breaks flatten.
+	text := strings.ReplaceAll(it.row.item.Description, "\n", " ")
 	if m.width > 6 {
 		text = fitCells(text, m.width-6)
 	}

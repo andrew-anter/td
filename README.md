@@ -16,8 +16,9 @@ in one JSON file; configuration layers through CLI flags,
   NORMAL/INSERT; motions, finds, and `d`/`c`/`x`/`s`/`r` operators with
   counts (see [Terminal UI](#terminal-ui))
 - Optional per-item descriptions — `td add -D "notes" "task"`,
-  `td describe <n> "notes"`, and `D` in the TUI; the selected item's
-  description previews under the list
+  `td describe <n> "notes"`, and `D` in the TUI; `E` edits the title
+  and description together in `$EDITOR`, git-commit style; the selected
+  item's description previews under the list
 - Projects as namespaces: `td project create gym`, then
   `td add -P gym "squat"`; every command targets one project (`-P`)
 - Move items between projects — `td move <n> <project>` or `m` in the
@@ -259,6 +260,7 @@ show `-` so the columns stay aligned.
 | `enter`/`space` | toggle the selected item done ↔ pending           |
 | `a`          | add a new task (enter commits; `esc` drops to NORMAL, `esc` again cancels) |
 | `e`          | edit the selected item's text                        |
+| `E`          | edit title + description in `$EDITOR` (git-style buffer: title first line, then description after a blank line) |
 | `D`          | edit the selected item's description (same editor; empty commit clears it) |
 | `d`          | delete the selected item                             |
 | `1` / `2` / `3` | set the selected item's priority                  |
@@ -295,8 +297,14 @@ when the block hits the cap it scrolls vertically so the caret is
 always on screen. Task rows and status messages clip to the terminal
 width with `…`; press `e` to see the full text in the wrapped editor.
 Items with a description show it as a dim `↳ …` preview line under
-the list while they are selected (truncated to one line; `D` opens
-the full text in the same editor).
+the list while they are selected (truncated to one line; paragraph
+breaks flatten to spaces in the preview, the `D` field, and `D`
+commits — commit without edits keeps the stored text as-is). For the
+full multi-paragraph experience press `E`: the task opens in
+`$EDITOR` (falling back to `$VISUAL`, then `vi`) as a git-style
+buffer — first line is the title, text after a blank line is the
+description, `#` lines are stripped. Exiting the editor with a
+failure, or with an empty title, aborts without touching the data.
 
 Emacs-style editing stays available inside INSERT mode (arrows,
 `ctrl-a`/`ctrl-e`/`ctrl-w`/`ctrl-u`).

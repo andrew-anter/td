@@ -4,7 +4,9 @@ Copyright © 2025 Andrew Anter <andrew.anter@gmail.com>
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -509,5 +511,91 @@ func TestUIPreviewShowsSelectedDescription(t *testing.T) {
 	}
 	if strings.Count(after, "\n") != withPreview {
 		t.Errorf("total height changed with the preview — footer no longer pinned")
+	}
+}
+
+func TestUIEditorFinishAppliesTitleAndDesc(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "fix the sink", Priority: 2},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+
+	f := filepath.Join(t.TempDir(), "buffer.md")
+	if err := os.WriteFile(f, []byte("new title\n\npara one\n\npara two\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := m.Update(editTaskFinishedMsg{path: f, fileIdx: 0})
+	m = updated.(uiModel)
+
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	it := got.Projects[0].Items[0]
+	if it.Text != "new title" || it.Description != "para one\n\npara two" {
+		t.Fatalf("item after editor = %+v", it)
+	}
+	if _, statErr := os.Stat(f); !os.IsNotExist(statErr) {
+		t.Errorf("editor temp file was not cleaned up")
+	}
+}
+
+func TestUIEditorCancelKeepsItem(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "keep me", Priority: 2, Description: "intact"},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.persist("seeded")
+
+	f := filepath.Join(t.TempDir(), "buffer.md")
+	if err := os.WriteFile(f, []byte("half edited junk\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.Update(editTaskFinishedMsg{err: errors.New("editor exited nonzero"), path: f, fileIdx: 0})
+
+	got, _ := task.ReadStore(path)
+	it := got.Projects[0].Items[0]
+	if it.Text != "keep me" || it.Description != "intact" {
+		t.Fatalf("failed editor run mutated the item: %+v", it)
+	}
+}
+
+func TestUIPreviewFlattensParagraphBreaks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "t", Priority: 2, Description: "para one\npara two"},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	content := m.View().Content
+	if !strings.Contains(content, "↳ para one para two") {
+		t.Fatalf("preview did not flatten breaks:\n%s", content)
+	}
+	if strings.Contains(content, "para one\npara two") {
+		t.Errorf("preview leaked a hard break into the layout")
+	}
+}
+
+// D flattens newlines when loading; committing without edits must not
+// rewrite the stored paragraph bytes.
+func TestUIDescribeUntouchedKeepsParagraphs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "t", Priority: 2, Description: "one\n\ntwo"},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+	m.persist("seeded")
+
+	pressKeys(&m, []string{"D", "enter"})
+
+	got, _ := task.ReadStore(path)
+	if d := got.Projects[0].Items[0].Description; d != "one\n\ntwo" {
+		t.Fatalf("untouched D commit flattened Description to %q", d)
 	}
 }

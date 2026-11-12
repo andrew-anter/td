@@ -150,6 +150,8 @@ type runeSeg struct{ s, e int }
 
 // wrapRunes greedily breaks the text at space boundaries so each
 // visual line fits width cells; words longer than width are split.
+// The underlying textinput sanitizes newlines away, so values here
+// are always one logical line.
 func wrapRunes(rs []rune, width int) []runeSeg {
 	var segs []runeSeg
 	start, col, brk := 0, 0, -1
