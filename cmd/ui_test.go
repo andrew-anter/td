@@ -93,6 +93,13 @@ func TestToggleAndDeleteItem(t *testing.T) {
 	if !items[1].Done || items[0].Done {
 		t.Errorf("toggleItem hit the wrong element: %+v", items)
 	}
+	if items[1].Completed.IsZero() {
+		t.Errorf("toggleItem did not stamp Completed: %+v", items[1])
+	}
+	toggleItem(items, 1)
+	if items[1].Done || !items[1].Completed.IsZero() {
+		t.Errorf("reopening did not clear Done/Completed: %+v", items[1])
+	}
 	items = deleteItem(items, 0)
 	if len(items) != 1 || items[0].Text != "flip" {
 		t.Errorf("deleteItem removed the wrong element: %+v", items)

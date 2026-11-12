@@ -6,6 +6,7 @@ package cmd
 import (
 	"fmt"
 	"strconv"
+	"time"
 	"todo/task"
 
 	"github.com/spf13/cobra"
@@ -63,6 +64,7 @@ func reopenRun(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	items[target].Done = false
+	items[target].Completed = time.Time{}
 
 	if err := task.SaveStore(path, store); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)

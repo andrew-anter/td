@@ -213,9 +213,10 @@ func TestCreatedOmittedForLegacyItems(t *testing.T) {
 	path := filepath.Join(dir, "tasks.json")
 
 	when := time.Date(2026, 11, 12, 9, 30, 0, 0, time.UTC)
+	done := time.Date(2026, 11, 12, 17, 0, 0, 0, time.UTC)
 	in := Store{Projects: []Project{{Name: DefaultProject, Items: []Item{
-		{Text: "legacy", Priority: 2},
-		{Text: "stamped", Priority: 2, Created: when},
+		{Text: "legacy", Priority: 2, Done: true},
+		{Text: "stamped", Priority: 2, Created: when, Completed: done},
 	}}}}
 	if err := SaveStore(path, in); err != nil {
 		t.Fatalf("SaveStore: %v", err)
@@ -234,11 +235,13 @@ func TestCreatedOmittedForLegacyItems(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	items := decoded.Projects[0].Items
-	if _, ok := items[0]["Created"]; ok {
-		t.Errorf("legacy item gained a Created field: %s", items[0]["Created"])
-	}
-	if _, ok := items[1]["Created"]; !ok {
-		t.Errorf("stamped item lost its Created field: %s", raw)
+	for _, key := range []string{"Created", "Completed"} {
+		if _, ok := items[0][key]; ok {
+			t.Errorf("legacy item gained a %s field: %s", key, items[0][key])
+		}
+		if _, ok := items[1][key]; !ok {
+			t.Errorf("stamped item lost its %s field: %s", key, raw)
+		}
 	}
 
 	out, err := ReadStore(path)
@@ -248,7 +251,10 @@ func TestCreatedOmittedForLegacyItems(t *testing.T) {
 	if got := out.Projects[0].Items[1].Created; !got.Equal(when) {
 		t.Errorf("Created round-trip = %v, want %v", got, when)
 	}
-	if !out.Projects[0].Items[0].Created.IsZero() {
-		t.Errorf("legacy Created = %v, want zero", out.Projects[0].Items[0].Created)
+	if got := out.Projects[0].Items[1].Completed; !got.Equal(done) {
+		t.Errorf("Completed round-trip = %v, want %v", got, done)
+	}
+	if !out.Projects[0].Items[0].Completed.IsZero() {
+		t.Errorf("legacy Completed = %v, want zero", out.Projects[0].Items[0].Completed)
 	}
 }

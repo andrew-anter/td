@@ -23,8 +23,10 @@ type Item struct {
 	Done     bool
 	// Created is zero for items written before timestamps existed;
 	// omitzero keeps the field out of the JSON for those, so old data
-	// files round-trip unchanged.
-	Created time.Time `json:"Created,omitzero"`
+	// files round-trip unchanged. Completed is zero while the item is
+	// pending (and for completed items that predate the field).
+	Created   time.Time `json:"Created,omitzero"`
+	Completed time.Time `json:"Completed,omitzero"`
 }
 
 // ByPri implements sort.Interface for []Item: undone first, then by
@@ -81,6 +83,15 @@ func (i *Item) PrettyCreated() string {
 		return "-"
 	}
 	return i.Created.Local().Format("2006-01-02")
+}
+
+// PrettyCompleted renders the local date the item was completed, or a
+// placeholder while pending.
+func (i *Item) PrettyCompleted() string {
+	if i.Completed.IsZero() {
+		return "-"
+	}
+	return i.Completed.Local().Format("2006-01-02")
 }
 
 // Project is a named namespace for items. Each project keeps its own

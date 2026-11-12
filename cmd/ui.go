@@ -86,17 +86,6 @@ func visibleRows(items []task.Item, view viewMode) []uiRow {
 	return rows
 }
 
-// hasCreatedDates reports whether the project carries any timestamp,
-// i.e. whether the date column is worth its width.
-func hasCreatedDates(items []task.Item) bool {
-	for _, it := range items {
-		if !it.Created.IsZero() {
-			return true
-		}
-	}
-	return false
-}
-
 // uiItem adapts a uiRow to the bubbles list.Item interface. Title is
 // what the built-in fuzzy filter matches against.
 type uiItem struct{ row uiRow }
@@ -105,10 +94,17 @@ func (i uiItem) Title() string       { return i.row.item.Text }
 func (i uiItem) Description() string { return "" }
 func (i uiItem) FilterValue() string { return i.row.item.Text }
 
+// Column widths are shared with columnHeader so the labels stay over
+// their columns.
+const (
+	doneColW = 4
+	priColW  = 3
+	dateColW = 10
+)
+
 // rowDelegate renders a row: global number, done marker, priority,
-// creation date, text. showDates is set from the whole project so old
-// data files keep their original layout.
-type rowDelegate struct{ showDates bool }
+// creation date, completion date, text.
+type rowDelegate struct{}
 
 func (d rowDelegate) Height() int                               { return 1 }
 func (d rowDelegate) Spacing() int                              { return 0 }
@@ -124,13 +120,11 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, listItem list.
 		text = dimStyle().Strikethrough(true).Render(text)
 	}
 	num := numStyle().Render(fmt.Sprintf("%4d.", it.row.num))
-	done := doneStyle().Render(strings.TrimSpace(it.row.item.PrettyDone()))
-	pri := priStyle(it.row.item.Priority).Render(strings.TrimSpace(it.row.item.PrettyP()))
-	line := fmt.Sprintf("%s %s %s %s", num, done, pri, text)
-	if d.showDates {
-		date := dimStyle().Render(fmt.Sprintf("%-10s", it.row.item.PrettyCreated()))
-		line = fmt.Sprintf("%s %s %s %s %s", num, done, pri, date, text)
-	}
+	done := doneStyle().Render(fmt.Sprintf("%-*s", doneColW, strings.TrimSpace(it.row.item.PrettyDone())))
+	pri := priStyle(it.row.item.Priority).Render(fmt.Sprintf("%-*s", priColW, strings.TrimSpace(it.row.item.PrettyP())))
+	created := dimStyle().Render(fmt.Sprintf("%-*s", dateColW, it.row.item.PrettyCreated()))
+	completed := dimStyle().Render(fmt.Sprintf("%-*s", dateColW, it.row.item.PrettyCompleted()))
+	line := fmt.Sprintf("%s %s %s %s %s %s", num, done, pri, created, completed, text)
 	if index == m.Index() {
 		fmt.Fprint(w, selectedStyle().Render("▸ "+line))
 		return
@@ -142,6 +136,11 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, listItem list.
 // these so the mapping is covered by tests.
 func toggleItem(items []task.Item, fileIdx int) {
 	items[fileIdx].Done = !items[fileIdx].Done
+	if items[fileIdx].Done {
+		items[fileIdx].Completed = time.Now()
+	} else {
+		items[fileIdx].Completed = time.Time{}
+	}
 }
 
 func deleteItem(items []task.Item, fileIdx int) []task.Item {
@@ -437,7 +436,6 @@ func (m *uiModel) refresh(status string) {
 	// text; discard it — view switches show everything.
 	m.list.ResetFilter()
 	m.list.SetItems(lis)
-	m.list.SetDelegate(rowDelegate{showDates: hasCreatedDates(m.items)})
 
 	if keepFileIdx >= 0 {
 		for k := range lis {
@@ -739,9 +737,9 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // contentHeight is the space left for the main body once header,
 // status/input line, and help are subtracted.
 func (m uiModel) contentHeight() int {
-	overhead := 4
+	overhead := 5
 	if m.help.ShowAll {
-		overhead = 9
+		overhead = 10
 	}
 	h := m.height - overhead
 	if h < 1 {
@@ -879,11 +877,11 @@ func (m uiModel) View() tea.View {
 
 	body := m.list.View()
 	if inProjects {
-		// The projects screen drops the header entirely — its rows
-		// already list every project — and reclaims that line, so
+		// The projects screen drops the task-list chrome — its rows
+		// already list every project — and reclaims both lines, so
 		// total height (and thus the footer position) matches the
 		// task list.
-		body = lipgloss.NewStyle().Height(m.contentHeight() + 1).Render(m.projectsView())
+		body = lipgloss.NewStyle().Height(m.contentHeight() + 2).Render(m.projectsView())
 	}
 
 	var inputLine string
@@ -909,7 +907,11 @@ func (m uiModel) View() tea.View {
 		footer = m.help.View(m.keys)
 	}
 
-	parts := []string{header, body}
+	parts := []string{header}
+	if !inProjects {
+		parts = append(parts, columnHeader())
+	}
+	parts = append(parts, body)
 	if inProjects {
 		parts = []string{body}
 	}
@@ -921,10 +923,22 @@ func (m uiModel) View() tea.View {
 	return v
 }
 
+// columnHeader labels the task-list columns; widths mirror
+// rowDelegate.Render.
+func columnHeader() string {
+	cells := fmt.Sprintf("%5s %-*s %-*s %-*s %-*s %s",
+		"#", doneColW, "DONE", priColW, "PRI", dateColW, "CREATED", dateColW, "COMPLETED", "TASK")
+	return "  " + headerStyle().Render(cells)
+}
+
 // Styles — colors from the ANSI 16 palette so they adapt to themes.
 
 func numStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+}
+
+func headerStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Bold(true)
 }
 
 func doneStyle() lipgloss.Style {

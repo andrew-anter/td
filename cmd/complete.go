@@ -6,6 +6,7 @@ package cmd
 import (
 	"fmt"
 	"strconv"
+	"time"
 	"todo/task"
 
 	"github.com/spf13/cobra"
@@ -57,7 +58,10 @@ func completeRun(cmd *cobra.Command, args []string) error {
 	// a sorted list, without mutating the loaded slice. Saving in
 	// original order keeps indices stable across runs.
 	target := sortedOrderIndices(items)[i-1]
-	items[target].Done = true
+	if !items[target].Done {
+		items[target].Done = true
+		items[target].Completed = time.Now()
+	}
 
 	if err := task.SaveStore(path, store); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)

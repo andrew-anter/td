@@ -188,8 +188,9 @@ Tasks are stored as projects, each holding its items:
     { "name": "inbox", "items": [
       { "Text": "buy milk",     "Priority": 2, "Done": false,
         "Created": "2026-11-12T09:30:00+02:00" },
-      { "Text": "write report", "Priority": 1, "Done": false,
-        "Created": "2026-11-11T18:04:07+02:00" }
+      { "Text": "write report", "Priority": 1, "Done": true,
+        "Created": "2026-11-11T18:04:07+02:00",
+        "Completed": "2026-11-11T19:22:41+02:00" }
     ] },
     { "name": "gym", "items": [
       { "Text": "squat", "Priority": 2, "Done": false,
@@ -199,9 +200,10 @@ Tasks are stored as projects, each holding its items:
 }
 ```
 
-`Created` is stamped when an item is added. Items written before
-timestamps existed simply omit the field, so older files round-trip
-unchanged; in the TUI those items show `-` in the date column.
+`Created` is stamped when an item is added, `Completed` when it is
+marked done (and cleared again on reopen). Items written before a
+timestamp existed omit that field and show `-` in the TUI, so older
+files round-trip unchanged.
 
 Old pre-project files — a bare JSON array of items — keep working: on
 read they migrate transparently into the `inbox` project, and the new
@@ -224,18 +226,21 @@ and never leave your machine via this repo.
 Run `td` with no arguments:
 
 ```
- inbox 1/2  pending (3)  all (8)  completed (5)
- ▸  1.  (1) 2026-11-12 urgent call
-    2.  (3) 2026-11-12 write blog
-    3. X    2026-11-10 old task A
-    add ▸ █
+ inbox 1/2  pending (2)  all (3)  completed (1)
+       # DONE PRI CREATED    COMPLETED  TASK
+ ▸    1.      (1) 2026-11-12 -          urgent call
+      2.          -          -          old task A
+      3. X    (3) 2026-11-11 2026-11-12 write blog
+    add  ❯ █
     added "buy milk"
     a add · enter toggle done · e edit · d delete · m move to project · p projects · tab next view · / filter · q quit
 ```
 
-The date column appears once the project holds at least one
-timestamped item; a project whose items all predate timestamps keeps
-the original column layout.
+Rows are fixed-width under a header line: number, done marker,
+priority, the date the item was created, the date it was completed, and
+the task text. Items without a recorded timestamp — pending items in
+the completion column, and anything created before timestamps existed —
+show `-` so the columns stay aligned.
 
 | Key          | Action                                              |
 | ------------ | --------------------------------------------------- |
