@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // DefaultProject is the namespace used when no --project is given.
@@ -20,6 +21,10 @@ type Item struct {
 	Text     string
 	Priority int
 	Done     bool
+	// Created is zero for items written before timestamps existed;
+	// omitzero keeps the field out of the JSON for those, so old data
+	// files round-trip unchanged.
+	Created time.Time `json:"Created,omitzero"`
 }
 
 // ByPri implements sort.Interface for []Item: undone first, then by
@@ -66,6 +71,16 @@ func (i *Item) PrettyDone() string {
 		return "X"
 	}
 	return ""
+}
+
+// PrettyCreated renders the local calendar date the item was added.
+// Items predating timestamps get a placeholder so the column stays
+// aligned.
+func (i *Item) PrettyCreated() string {
+	if i.Created.IsZero() {
+		return "-"
+	}
+	return i.Created.Local().Format("2006-01-02")
 }
 
 // Project is a named namespace for items. Each project keeps its own

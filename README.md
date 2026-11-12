@@ -186,15 +186,22 @@ Tasks are stored as projects, each holding its items:
 {
   "projects": [
     { "name": "inbox", "items": [
-      { "Text": "buy milk",     "Priority": 2, "Done": false },
-      { "Text": "write report", "Priority": 1, "Done": false }
+      { "Text": "buy milk",     "Priority": 2, "Done": false,
+        "Created": "2026-11-12T09:30:00+02:00" },
+      { "Text": "write report", "Priority": 1, "Done": false,
+        "Created": "2026-11-11T18:04:07+02:00" }
     ] },
     { "name": "gym", "items": [
-      { "Text": "squat", "Priority": 2, "Done": false }
+      { "Text": "squat", "Priority": 2, "Done": false,
+        "Created": "2026-11-12T07:00:00+02:00" }
     ] }
   ]
 }
 ```
+
+`Created` is stamped when an item is added. Items written before
+timestamps existed simply omit the field, so older files round-trip
+unchanged; in the TUI those items show `-` in the date column.
 
 Old pre-project files — a bare JSON array of items — keep working: on
 read they migrate transparently into the `inbox` project, and the new
@@ -218,13 +225,17 @@ Run `td` with no arguments:
 
 ```
  inbox 1/2  pending (3)  all (8)  completed (5)
- ▸  1.      urgent call
-    2.  X   old task A
-    3.      write blog
+ ▸  1.  (1) 2026-11-12 urgent call
+    2.  (3) 2026-11-12 write blog
+    3. X    2026-11-10 old task A
     add ▸ █
     added "buy milk"
     a add · enter toggle done · e edit · d delete · m move to project · p projects · tab next view · / filter · q quit
 ```
+
+The date column appears once the project holds at least one
+timestamped item; a project whose items all predate timestamps keeps
+the original column layout.
 
 | Key          | Action                                              |
 | ------------ | --------------------------------------------------- |

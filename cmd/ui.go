@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -85,6 +86,17 @@ func visibleRows(items []task.Item, view viewMode) []uiRow {
 	return rows
 }
 
+// hasCreatedDates reports whether the project carries any timestamp,
+// i.e. whether the date column is worth its width.
+func hasCreatedDates(items []task.Item) bool {
+	for _, it := range items {
+		if !it.Created.IsZero() {
+			return true
+		}
+	}
+	return false
+}
+
 // uiItem adapts a uiRow to the bubbles list.Item interface. Title is
 // what the built-in fuzzy filter matches against.
 type uiItem struct{ row uiRow }
@@ -94,8 +106,9 @@ func (i uiItem) Description() string { return "" }
 func (i uiItem) FilterValue() string { return i.row.item.Text }
 
 // rowDelegate renders a row: global number, done marker, priority,
-// text.
-type rowDelegate struct{}
+// creation date, text. showDates is set from the whole project so old
+// data files keep their original layout.
+type rowDelegate struct{ showDates bool }
 
 func (d rowDelegate) Height() int                               { return 1 }
 func (d rowDelegate) Spacing() int                              { return 0 }
@@ -114,6 +127,10 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, listItem list.
 	done := doneStyle().Render(strings.TrimSpace(it.row.item.PrettyDone()))
 	pri := priStyle(it.row.item.Priority).Render(strings.TrimSpace(it.row.item.PrettyP()))
 	line := fmt.Sprintf("%s %s %s %s", num, done, pri, text)
+	if d.showDates {
+		date := dimStyle().Render(fmt.Sprintf("%-10s", it.row.item.PrettyCreated()))
+		line = fmt.Sprintf("%s %s %s %s %s", num, done, pri, date, text)
+	}
 	if index == m.Index() {
 		fmt.Fprint(w, selectedStyle().Render("▸ "+line))
 		return
@@ -420,6 +437,7 @@ func (m *uiModel) refresh(status string) {
 	// text; discard it — view switches show everything.
 	m.list.ResetFilter()
 	m.list.SetItems(lis)
+	m.list.SetDelegate(rowDelegate{showDates: hasCreatedDates(m.items)})
 
 	if keepFileIdx >= 0 {
 		for k := range lis {
@@ -511,7 +529,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			default:
 				if text != "" && m.mode == modeAdd {
-					m.items = append(m.items, task.Item{Text: text, Priority: 2})
+					m.items = append(m.items, task.Item{Text: text, Priority: 2, Created: time.Now()})
 					m.persist(fmt.Sprintf("added %q", text))
 				} else if text != "" && m.editingFileIdx >= 0 && m.editingFileIdx < len(m.items) {
 					m.items[m.editingFileIdx].Text = text

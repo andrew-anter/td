@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 	"todo/task"
 
 	"github.com/spf13/cobra"
@@ -47,7 +48,7 @@ func addRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	for _, x := range args {
-		item := task.Item{Text: x}
+		item := task.Item{Text: x, Created: time.Now()}
 		if err := item.SetPriority(priority); err != nil {
 			return err
 		}

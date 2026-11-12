@@ -4,11 +4,13 @@ Copyright © 2025 Andrew Anter <andrew.anter@gmail.com>
 package task
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 )
 
 func TestSetPriority(t *testing.T) {
@@ -201,5 +203,52 @@ func TestValidateProjectName(t *testing.T) {
 		if err := ValidateProjectName(n); err == nil {
 			t.Errorf("ValidateProjectName(%q) = nil, want error", n)
 		}
+	}
+}
+
+// Items that predate timestamps must not gain a bogus Created field
+// when the store is rewritten, while new items keep theirs.
+func TestCreatedOmittedForLegacyItems(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.json")
+
+	when := time.Date(2026, 11, 12, 9, 30, 0, 0, time.UTC)
+	in := Store{Projects: []Project{{Name: DefaultProject, Items: []Item{
+		{Text: "legacy", Priority: 2},
+		{Text: "stamped", Priority: 2, Created: when},
+	}}}}
+	if err := SaveStore(path, in); err != nil {
+		t.Fatalf("SaveStore: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Projects []struct {
+			Items []map[string]json.RawMessage `json:"items"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	items := decoded.Projects[0].Items
+	if _, ok := items[0]["Created"]; ok {
+		t.Errorf("legacy item gained a Created field: %s", items[0]["Created"])
+	}
+	if _, ok := items[1]["Created"]; !ok {
+		t.Errorf("stamped item lost its Created field: %s", raw)
+	}
+
+	out, err := ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	if got := out.Projects[0].Items[1].Created; !got.Equal(when) {
+		t.Errorf("Created round-trip = %v, want %v", got, when)
+	}
+	if !out.Projects[0].Items[0].Created.IsZero() {
+		t.Errorf("legacy Created = %v, want zero", out.Projects[0].Items[0].Created)
 	}
 }
