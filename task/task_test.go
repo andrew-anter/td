@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -256,5 +257,34 @@ func TestCreatedOmittedForLegacyItems(t *testing.T) {
 	}
 	if !out.Projects[0].Items[0].Completed.IsZero() {
 		t.Errorf("legacy Completed = %v, want zero", out.Projects[0].Items[0].Completed)
+	}
+}
+
+func TestDescriptionOmittedWhenEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.json")
+
+	in := Store{Projects: []Project{{Name: DefaultProject, Items: []Item{{Text: "milk", Priority: 2}}}}}
+	if err := SaveStore(path, in); err != nil {
+		t.Fatalf("SaveStore: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "Description") {
+		t.Errorf("empty Description leaked into the JSON: %s", raw)
+	}
+
+	in.Projects[0].Items[0].Description = "the 2% kind"
+	if err := SaveStore(path, in); err != nil {
+		t.Fatalf("SaveStore: %v", err)
+	}
+	got, err := ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	if got.Projects[0].Items[0].Description != "the 2% kind" {
+		t.Errorf("Description did not round-trip: %+v", got.Projects[0].Items[0])
 	}
 }

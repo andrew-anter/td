@@ -15,6 +15,9 @@ in one JSON file; configuration layers through CLI flags,
 - Vim-style modal editing in every text field — `esc` toggles
   NORMAL/INSERT; motions, finds, and `d`/`c`/`x`/`s`/`r` operators with
   counts (see [Terminal UI](#terminal-ui))
+- Optional per-item descriptions — `td add -D "notes" "task"`,
+  `td describe <n> "notes"`, and `D` in the TUI; the selected item's
+  description previews under the list
 - Projects as namespaces: `td project create gym`, then
   `td add -P gym "squat"`; every command targets one project (`-P`)
 - Move items between projects — `td move <n> <project>` or `m` in the
@@ -74,6 +77,7 @@ td completed             # completed items only
 td project               # list projects with counts (alias: projects)
 td move 2 gym            # aliases: mv — item #2 of the current project → gym
 td edit 2 "buy oat milk" # replace item #2's text
+td describe 2 "two liters" # set item #2's description ("" clears it)
 td complete 1            # aliases: c, comp — mark item #1 done
 td reopen 1              # alias: uncomplete — mark item #1 pending
 td delete 1              # aliases: rm, del — remove item #1
@@ -88,6 +92,7 @@ td delete --completed    # remove every completed task
 | `list`            | `ls`         | Print items in display order (pending first, then priority).  |
 | `completed`       | —            | Print only completed items.                                   |
 | `edit <n> <text>` | —            | Replace the text of item `n`.                                 |
+| `describe <n> <text>` | `desc`   | Set item `n`'s description; empty text clears it.             |
 | `complete <n>`    | `c`, `comp`  | Mark item `n` as done.                                        |
 | `reopen <n>`      | `uncomplete` | Mark item `n` as pending (silent no-op if already pending).    |
 | `delete <n>`      | `rm`, `del`  | Delete item `n`, or with `--completed` delete every done item. |
@@ -107,6 +112,7 @@ pending list instead, exactly like `td list`.
 | ----------------------- | ---------- | -------------------- | ------------------------------------------------------ |
 | `-P, --project <name>`  | all item commands | `inbox`        | Project namespace to operate on. Unknown names error (except `inbox`, which always exists); `td list --count` ignores it. |
 | `-p, --priority N`      | `add`      | `2`                  | Priority: `1` high, `2` normal, `3` low. Anything else is rejected and nothing is written. |
+| `-D, --desc <text>`     | `add`      | none                 | Description stored with the item (applied to each added arg). |
 | `-a, --all`             | `list`     | `false`              | Include completed items.                               |
 | `-d, --completed`       | `list`     | `false`              | Show only completed items.                             |
 | `--json`                | `list`     | `false`              | JSON array with a 1-based `Index` per item.            |
@@ -150,8 +156,10 @@ in-project `Index`:
 ```sh
 $ td list --json
 [{"Index":1,"Text":"write report","Priority":1,"Done":false},
- {"Index":2,"Text":"buy milk","Priority":2,"Done":false}]
+ {"Index":2,"Text":"buy milk","Description":"two liters","Priority":2,"Done":false}]
 ```
+
+`Description` appears only on items that have one.
 
 Filters (`--all`, `--completed`) apply to `--json` output as well; item
 indices stay consistent across views of the same project.
@@ -189,7 +197,7 @@ Tasks are stored as projects, each holding its items:
 {
   "projects": [
     { "name": "inbox", "items": [
-      { "Text": "buy milk",     "Priority": 2, "Done": false,
+      { "Text": "buy milk", "Description": "two liters", "Priority": 2, "Done": false,
         "Created": "2026-11-12T09:30:00+02:00" },
       { "Text": "write report", "Priority": 1, "Done": true,
         "Created": "2026-11-11T18:04:07+02:00",
@@ -251,6 +259,7 @@ show `-` so the columns stay aligned.
 | `enter`/`space` | toggle the selected item done ↔ pending           |
 | `a`          | add a new task (enter commits; `esc` drops to NORMAL, `esc` again cancels) |
 | `e`          | edit the selected item's text                        |
+| `D`          | edit the selected item's description (same editor; empty commit clears it) |
 | `d`          | delete the selected item                             |
 | `1` / `2` / `3` | set the selected item's priority                  |
 | `m`          | move the selected item to another project (opens the projects screen; enter picks the destination) |
@@ -264,10 +273,10 @@ show `-` so the columns stay aligned.
 
 ### Text fields: vim editing
 
-The add, edit, and project fields open in INSERT mode. `esc` switches
-to NORMAL (the line shows a small `i`/`n` tag); `enter` commits from
-either mode, and `esc` again in NORMAL cancels the edit. In NORMAL
-mode the field behaves like a one-line vim buffer:
+The add, edit, describe, and project fields open in INSERT mode. `esc`
+switches to NORMAL (the line shows a small `i`/`n` tag); `enter`
+commits from either mode, and `esc` again in NORMAL cancels the edit.
+In NORMAL mode the field behaves like a one-line vim buffer:
 
 | Keys                       | Effect                                            |
 | -------------------------- | ------------------------------------------------- |
@@ -285,6 +294,9 @@ lines align under the prompt, the task list shrinks to make room, and
 when the block hits the cap it scrolls vertically so the caret is
 always on screen. Task rows and status messages clip to the terminal
 width with `…`; press `e` to see the full text in the wrapped editor.
+Items with a description show it as a dim `↳ …` preview line under
+the list while they are selected (truncated to one line; `D` opens
+the full text in the same editor).
 
 Emacs-style editing stays available inside INSERT mode (arrows,
 `ctrl-a`/`ctrl-e`/`ctrl-w`/`ctrl-u`).

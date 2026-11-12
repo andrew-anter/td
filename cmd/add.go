@@ -13,6 +13,7 @@ import (
 )
 
 var priority int
+var descOpt string
 
 var addCmd = &cobra.Command{
 	Use:           "add",
@@ -48,7 +49,7 @@ func addRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	for _, x := range args {
-		item := task.Item{Text: x, Created: time.Now()}
+		item := task.Item{Text: x, Description: descOpt, Created: time.Now()}
 		if err := item.SetPriority(priority); err != nil {
 			return err
 		}
@@ -64,4 +65,5 @@ func addRun(cmd *cobra.Command, args []string) error {
 func init() {
 	rootCmd.AddCommand(addCmd)
 	addCmd.Flags().IntVarP(&priority, "priority", "p", 2, "Priority:1,2,3")
+	addCmd.Flags().StringVarP(&descOpt, "desc", "D", "", "Description stored with the item (applies to each added arg).")
 }

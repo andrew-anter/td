@@ -431,3 +431,83 @@ func TestLongTaskRowsAndStatusFitWidth(t *testing.T) {
 		t.Errorf("no ellipsis — row or status not truncated")
 	}
 }
+
+func pressKeys(m *uiModel, keys []string) {
+	for _, k := range keys {
+		updated, _ := m.handleKey(keyMsg(k))
+		*m = updated.(uiModel)
+	}
+}
+
+func TestUIDescribeKeySetsAndPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "fix the sink", Priority: 2},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	pressKeys(&m, []string{"D", "k", "e", "r", "k", "e", "d", " ", "t", "i", "g", "h", "t", "enter"})
+
+	if m.mode != modeNormal {
+		t.Fatalf("mode = %v, want normal after commit", m.mode)
+	}
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	if d := got.Projects[0].Items[0].Description; d != "kerked tight" {
+		t.Fatalf("persisted Description = %q, want %q", d, "kerked tight")
+	}
+}
+
+func TestUIDescribeCancelKeepsText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "fix the sink", Priority: 2, Description: "original"},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+	m.persist("seeded")
+
+	pressKeys(&m, []string{"D", "x", "y", "z", "esc", "esc"})
+
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	if d := got.Projects[0].Items[0].Description; d != "original" {
+		t.Fatalf("cancel changed Description to %q", d)
+	}
+	if m.mode != modeNormal {
+		t.Fatalf("mode = %v, want normal after cancel", m.mode)
+	}
+}
+
+func TestUIPreviewShowsSelectedDescription(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "fix the sink", Priority: 2, Description: "kerl valve stripped"},
+		{Text: "no desc", Priority: 2},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	content := m.View().Content
+	if !strings.Contains(content, "↳ kerl valve stripped") {
+		t.Fatalf("preview line missing from view:\n%s", content)
+	}
+	withPreview := strings.Count(content, "\n")
+
+	pressKeys(&m, []string{"j"})
+	after := m.View().Content
+	if strings.Contains(after, "↳") {
+		t.Fatalf("preview shown for item without description:\n%s", after)
+	}
+	if strings.Count(after, "\n") != withPreview {
+		t.Errorf("total height changed with the preview — footer no longer pinned")
+	}
+}

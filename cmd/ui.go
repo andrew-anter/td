@@ -159,6 +159,7 @@ const (
 	modeNormal inputMode = iota
 	modeAdd
 	modeEdit
+	modeDescribe   // wrapped field editing the selected item's description
 	modeProjects   // full-page projects screen (p to manage, m to pick a move target)
 	modeNewProject // textinput for a new project name
 	modeRename     // textinput renaming a project
@@ -169,6 +170,7 @@ type uiKeys struct {
 	Toggle      key.Binding
 	Add         key.Binding
 	Edit        key.Binding
+	Describe    key.Binding
 	Delete      key.Binding
 	Pri1        key.Binding
 	Pri2        key.Binding
@@ -190,7 +192,7 @@ func (k uiKeys) ShortHelp() []key.Binding {
 
 func (k uiKeys) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Add, k.Edit, k.Delete, k.Toggle},
+		{k.Add, k.Edit, k.Describe, k.Delete, k.Toggle},
 		{k.Pri1, k.Pri2, k.Pri3, k.Move, k.Pick, k.PrevProject, k.NextProject},
 		{k.Cycle, k.CycleRev, k.Filter, k.Reload, k.Help, k.Quit},
 	}
@@ -202,6 +204,7 @@ func newUIKeys() uiKeys {
 		Toggle:      key.NewBinding(key.WithKeys("enter", "space"), key.WithHelp("enter", "toggle done")),
 		Add:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 		Edit:        key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
+		Describe:    key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "describe")),
 		Delete:      key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		Pri1:        key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "high pri")),
 		Pri2:        key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "med pri")),
@@ -507,7 +510,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// Input modes own the keyboard: enter commits, esc drops to
 	// NORMAL, and a second esc cancels.
-	if m.mode == modeAdd || m.mode == modeEdit || m.mode == modeNewProject || m.mode == modeRename {
+	if m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename {
 		act, cmd := m.input.HandleKey(msg)
 		switch act {
 		case vimCommit:
@@ -531,13 +534,21 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.mode = modeProjects
 				return m, nil
 			default:
-				if text != "" && m.mode == modeAdd {
+				switch {
+				case m.mode == modeAdd && text != "":
 					m.items = append(m.items, task.Item{Text: text, Priority: 2, Created: time.Now()})
 					m.persist(fmt.Sprintf("added %q", text))
-				} else if text != "" && m.editingFileIdx >= 0 && m.editingFileIdx < len(m.items) {
+				case m.mode == modeEdit && text != "" && m.editingFileIdx >= 0 && m.editingFileIdx < len(m.items):
 					m.items[m.editingFileIdx].Text = text
 					m.persist(fmt.Sprintf("edited %q", text))
-				} else {
+				case m.mode == modeDescribe && m.editingFileIdx >= 0 && m.editingFileIdx < len(m.items):
+					m.items[m.editingFileIdx].Description = text
+					if text == "" {
+						m.persist("description cleared")
+					} else {
+						m.persist(fmt.Sprintf("described %q", m.items[m.editingFileIdx].Text))
+					}
+				default:
 					m.refresh("cancelled")
 				}
 				m.mode = modeNormal
@@ -704,6 +715,17 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case key.Matches(msg, m.keys.Describe):
+		if it, ok := m.selected(); ok {
+			m.mode = modeDescribe
+			m.editingFileIdx = it.row.fileIdx
+			m.input.SetValue(it.row.item.Description)
+			m.input.Enter()
+			m.input.Placeholder = "description"
+			m.input.Focus()
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keys.Toggle):
 		if it, ok := m.selected(); ok {
 			toggleItem(m.items, it.row.fileIdx)
@@ -750,12 +772,32 @@ func fitCells(s string, width int) string {
 	return ansi.Truncate(s, width, "…")
 }
 
+// previewLine is the dim description shown under the task list while
+// the selected item has one; "" renders nothing.
+func (m uiModel) previewLine() string {
+	if m.mode != modeNormal {
+		return ""
+	}
+	it, ok := m.selected()
+	if !ok || it.row.item.Description == "" {
+		return ""
+	}
+	text := it.row.item.Description
+	if m.width > 6 {
+		text = fitCells(text, m.width-6)
+	}
+	return "  " + dimStyle().Render("↳ "+text)
+}
+
 // contentHeight is the space left for the main body once header,
 // status/input line, and help are subtracted.
 func (m uiModel) contentHeight() int {
 	overhead := 5
 	if m.help.ShowAll {
 		overhead = 10
+	}
+	if m.previewLine() != "" {
+		overhead++
 	}
 	h := m.height - overhead
 	if h < 1 {
@@ -895,7 +937,7 @@ func (m uiModel) View() tea.View {
 	// several lines the list shrinks to keep the footer on screen.
 	var inputLine string
 	inputH := 1
-	inInput := m.mode == modeAdd || m.mode == modeEdit || m.mode == modeNewProject || m.mode == modeRename
+	inInput := m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename
 	if inInput {
 		var label string
 		switch m.mode {
@@ -903,6 +945,8 @@ func (m uiModel) View() tea.View {
 			label = "add  "
 		case modeEdit:
 			label = "edit "
+		case modeDescribe:
+			label = "describe "
 		case modeNewProject:
 			label = "project "
 		case modeRename:
@@ -955,6 +999,9 @@ func (m uiModel) View() tea.View {
 		parts = append(parts, columnHeader())
 	}
 	parts = append(parts, body)
+	if pv := m.previewLine(); pv != "" {
+		parts = append(parts, pv)
+	}
 	if inProjects {
 		parts = []string{body}
 	}

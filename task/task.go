@@ -18,9 +18,13 @@ import (
 const DefaultProject = "inbox"
 
 type Item struct {
-	Text     string
-	Priority int
-	Done     bool
+	Text string
+	// Description is optional supporting detail; omitzero keeps empty
+	// descriptions out of the JSON so old data files round-trip
+	// unchanged.
+	Description string `json:"Description,omitzero"`
+	Priority    int
+	Done        bool
 	// Created is zero for items written before timestamps existed;
 	// omitzero keeps the field out of the JSON for those, so old data
 	// files round-trip unchanged. Completed is zero while the item is
