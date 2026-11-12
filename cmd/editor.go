@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -55,11 +56,18 @@ func parseTaskBuffer(s string) (string, string) {
 	return title, strings.Join(rest, "\n")
 }
 
-// externalEditor mirrors git's editor selection chain.
+// externalEditor resolves git's EDITOR/VISUAL chain, then falls back
+// to the first of nvim/vim/vi on PATH — many systems ship modern
+// editors without providing `vi`.
 func externalEditor() string {
 	for _, key := range []string{"EDITOR", "VISUAL"} {
 		if v := os.Getenv(key); v != "" {
 			return v
+		}
+	}
+	for _, prog := range []string{"nvim", "vim", "vi"} {
+		if _, err := exec.LookPath(prog); err == nil {
+			return prog
 		}
 	}
 	return "vi"

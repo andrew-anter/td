@@ -599,3 +599,24 @@ func TestUIDescribeUntouchedKeepsParagraphs(t *testing.T) {
 		t.Fatalf("untouched D commit flattened Description to %q", d)
 	}
 }
+
+func TestUIEditorMissingReportsStatus(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox", Items: []task.Item{
+		{Text: "t", Priority: 2},
+	}}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	t.Setenv("EDITOR", "no-such-editor-xyz")
+	updated, cmd := m.handleKey(keyMsg("E"))
+	m = updated.(uiModel)
+
+	if cmd != nil {
+		t.Errorf("spawned a process for a missing editor")
+	}
+	if !strings.Contains(m.status, "no-such-editor-xyz") || !strings.Contains(m.status, "set $EDITOR") {
+		t.Fatalf("status = %q, want a clear missing-editor hint", m.status)
+	}
+}

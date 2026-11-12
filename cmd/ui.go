@@ -771,6 +771,11 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
+		editor := externalEditor()
+		if _, err := exec.LookPath(strings.Fields(editor)[0]); err != nil {
+			m.refresh(fmt.Sprintf("editor %q not found — set $EDITOR", strings.Fields(editor)[0]))
+			return m, nil
+		}
 		f, err := os.CreateTemp("", "td-task-*.md")
 		if err != nil {
 			m.refresh("temp file: " + err.Error())
@@ -779,7 +784,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		_, _ = fmt.Fprint(f, taskBuffer(it.row.item.Text, it.row.item.Description))
 		_ = f.Close()
 		path := f.Name()
-		run := exec.Command("sh", "-c", externalEditor()+" \"$1\"", "td", path)
+		run := exec.Command("sh", "-c", editor+" \"$1\"", "td", path)
 		return m, tea.ExecProcess(run, func(err error) tea.Msg {
 			return editTaskFinishedMsg{err: err, path: path, fileIdx: it.row.fileIdx}
 		})

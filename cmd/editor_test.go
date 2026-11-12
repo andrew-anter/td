@@ -4,6 +4,8 @@ Copyright © 2025 Andrew Anter <andrew.anter@gmail.com>
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -47,5 +49,38 @@ func TestParseTaskBufferLenientNoBlankSeparator(t *testing.T) {
 	title, desc := parseTaskBuffer("t\ndirect body")
 	if title != "t" || desc != "direct body" {
 		t.Errorf("title = %q, desc = %q", title, desc)
+	}
+}
+
+func TestExternalEditorPrefersEnv(t *testing.T) {
+	t.Setenv("EDITOR", "mycustom -w")
+	if got := externalEditor(); got != "mycustom -w" {
+		t.Errorf("EDITOR ignored: %q", got)
+	}
+	t.Setenv("EDITOR", "")
+	t.Setenv("VISUAL", "vis")
+	if got := externalEditor(); got != "vis" {
+		t.Errorf("VISUAL ignored: %q", got)
+	}
+}
+
+func TestExternalEditorFallsBackToPathScan(t *testing.T) {
+	t.Setenv("EDITOR", "")
+	t.Setenv("VISUAL", "")
+	dir := t.TempDir()
+	for _, name := range []string{"vim", "vi"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	if got := externalEditor(); got != "vim" {
+		t.Errorf("chain without nvim = %q, want vim", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nvim"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := externalEditor(); got != "nvim" {
+		t.Errorf("chain with nvim = %q, want nvim", got)
 	}
 }

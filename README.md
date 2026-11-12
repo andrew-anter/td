@@ -300,11 +300,13 @@ Items with a description show it as a dim `↳ …` preview line under
 the list while they are selected (truncated to one line; paragraph
 breaks flatten to spaces in the preview, the `D` field, and `D`
 commits — commit without edits keeps the stored text as-is). For the
-full multi-paragraph experience press `E`: the task opens in
-`$EDITOR` (falling back to `$VISUAL`, then `vi`) as a git-style
-buffer — first line is the title, text after a blank line is the
-description, `#` lines are stripped. Exiting the editor with a
-failure, or with an empty title, aborts without touching the data.
+the full multi-paragraph experience press `E`: the task opens in
+`$EDITOR` (`$VISUAL`, else the first of `nvim`, `vim`, `vi` found on
+PATH) as a git-style buffer — the first line is the title, the text
+after a blank line is the description, and `#` lines are stripped.
+Exiting the editor with a failure, or with an empty title, aborts
+without touching the data; a missing editor reports a hint in the
+status line.
 
 Emacs-style editing stays available inside INSERT mode (arrows,
 `ctrl-a`/`ctrl-e`/`ctrl-w`/`ctrl-u`).
