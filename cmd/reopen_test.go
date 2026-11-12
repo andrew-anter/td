@@ -6,6 +6,7 @@ package cmd
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 	"todo/task"
@@ -41,9 +42,10 @@ func TestReopenPendingItem_NoOp(t *testing.T) {
 }
 
 func TestReopenDoneItem_MarksPending(t *testing.T) {
+	completed := time.Date(2026, 11, 12, 17, 0, 0, 0, time.UTC)
 	writeItems(t, []task.Item{
 		{Text: "buy milk", Priority: 2, Done: false},
-		{Text: "write report", Priority: 1, Done: true},
+		{Text: "write report", Priority: 1, Done: true, Completed: completed},
 	})
 
 	// ByPri order: pending first (buy milk, idx 0), then done (write
@@ -59,6 +61,9 @@ func TestReopenDoneItem_MarksPending(t *testing.T) {
 	}
 	if got[1].Done {
 		t.Errorf("item #1 (write report) should now be pending")
+	}
+	if !got[1].Completed.IsZero() {
+		t.Errorf("reopen left Completed set: %v", got[1].Completed)
 	}
 }
 
