@@ -89,12 +89,21 @@ func visibleRows(items []task.Item, view viewMode) []uiRow {
 }
 
 // uiItem adapts a uiRow to the bubbles list.Item interface. Title is
-// what the built-in fuzzy filter matches against.
+// the rendered label; FilterValue is what relevanceFilter searches.
 type uiItem struct{ row uiRow }
 
 func (i uiItem) Title() string       { return i.row.item.Text }
 func (i uiItem) Description() string { return "" }
-func (i uiItem) FilterValue() string { return i.row.item.Text }
+
+// FilterValue includes the description so `/` finds detail that only
+// lives there. The newline keeps a word from matching across the two
+// fields.
+func (i uiItem) FilterValue() string {
+	if d := i.row.item.Description; d != "" {
+		return i.row.item.Text + "\n" + d
+	}
+	return i.row.item.Text
+}
 
 // Column widths are shared with columnHeader so the labels stay over
 // their columns.
@@ -303,6 +312,7 @@ func newUIModel(path string, store task.Store, project string) uiModel {
 	l.SetShowPagination(false)
 	l.SetShowHelp(false)
 	l.SetFilteringEnabled(true)
+	l.Filter = relevanceFilter
 
 	ti := newVimInput()
 

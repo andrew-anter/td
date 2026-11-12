@@ -273,7 +273,7 @@ show `-` so the columns stay aligned.
 | `p`          | projects screen: enter select, `a` new, `e` rename, `d` delete (empty only, `y` confirms), esc back |
 | `[` / `]`    | switch to the previous / next project                |
 | `tab` / `shift+tab` | cycle views: pending → all → completed        |
-| `/`          | fuzzy-filter the current view; `esc` clears          |
+| `/`          | search the current view (text + description); matches are ranked by relevance, `esc` clears |
 | `r`          | reload the data file from disk                       |
 | `?`          | toggle the full keymap                               |
 | `q`, `esc`, `ctrl+c` | quit                                         |
