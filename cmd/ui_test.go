@@ -4,9 +4,12 @@ Copyright © 2025 Andrew Anter <andrew.anter@gmail.com>
 package cmd
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 
 	"todo/task"
 )
@@ -369,5 +372,62 @@ func TestVisibleRowsAfterDeleteRenumber(t *testing.T) {
 	}
 	if m.items[0].Text != "b" {
 		t.Errorf("fileIdx 0 should now be %q, got %q", "b", m.items[0].Text)
+	}
+}
+
+// Long task text must stay inside the terminal: the edit block wraps
+// instead of sliding a one-line viewport whose caret ends up past the
+// right screen edge.
+func TestEditBlockStaysWithinTerminalWidth(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{
+		{Name: "inbox", Items: []task.Item{{Text: "milk"}}},
+	}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+	m.help.SetWidth(m.width)
+
+	m.mode = modeAdd
+	m.input.SetValue("buy a really long amount of groceries for the entire week including milk eggs bread cheese and vegetables")
+	m.input.Enter()
+	m.input.Focus()
+
+	content := m.View().Content
+	lines := strings.Split(content, "\n")
+	if len(lines) < 5 {
+		t.Fatalf("content is %d lines, want the edit block to push past one", len(lines))
+	}
+	for i, line := range lines {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Errorf("line %d is %d cells wide, exceeds the %d-cell terminal — caret would be off-screen: %q", i, w, m.width, line)
+		}
+	}
+	if !strings.Contains(content, "vegetables") {
+		t.Errorf("tail of the wrapped text missing from the view")
+	}
+}
+
+// A 300-char task must not make list rows or the status line wider
+// than the terminal; rows truncate, the edit view shows the full text.
+func TestLongTaskRowsAndStatusFitWidth(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	long := strings.Repeat("word ", 60)
+	store := task.Store{Projects: []task.Project{
+		{Name: "inbox", Items: []task.Item{{Text: long}}},
+	}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+	m.help.SetWidth(m.width)
+
+	m.status = fmt.Sprintf("added %q", long)
+	for i, line := range strings.Split(m.View().Content, "\n") {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Errorf("line %d is %d cells, want ≤ %d: %q", i, w, m.width, line)
+		}
+	}
+	if !strings.Contains(m.View().Content, "…") {
+		t.Errorf("no ellipsis — row or status not truncated")
 	}
 }

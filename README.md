@@ -279,6 +279,13 @@ mode the field behaves like a one-line vim buffer:
 | `i` `a` `I` `A`            | return to INSERT (before/after cursor, line start/end) |
 | digits `1`–`9` prefix      | count: repeats the next motion or operator (`3w`, `2dw`, `5x`) |
 
+Long text stays visible: the buffer is one logical line that
+word-wraps into a block of up to six terminal lines — continuation
+lines align under the prompt, the task list shrinks to make room, and
+when the block hits the cap it scrolls vertically so the caret is
+always on screen. Task rows and status messages clip to the terminal
+width with `…`; press `e` to see the full text in the wrapped editor.
+
 Emacs-style editing stays available inside INSERT mode (arrows,
 `ctrl-a`/`ctrl-e`/`ctrl-w`/`ctrl-u`).
 

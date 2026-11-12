@@ -4,7 +4,11 @@ Copyright © 2025 Andrew Anter <andrew.anter@gmail.com>
 package cmd
 
 import (
+	"fmt"
+	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -136,5 +140,82 @@ func TestVimEnterResetsState(t *testing.T) {
 	}
 	if v.Position() != len([]rune("reworn")) {
 		t.Fatalf("Enter should park cursor at end, pos = %d", v.Position())
+	}
+}
+
+func TestEditViewWrapsLongText(t *testing.T) {
+	v := newField("buy a really long amount of groceries for the entire week including milk eggs bread cheese")
+	block, h := v.EditView(30, 6)
+	if h < 2 {
+		t.Fatalf("height = %d, want wrapped multi-line block", h)
+	}
+	for _, line := range strings.Split(block, "\n") {
+		if w := lipgloss.Width(line); w > 30 {
+			t.Errorf("line %q is %d cells, want ≤ 30", line, w)
+		}
+	}
+	if n := strings.Count(block, "\x1b[7m"); n != 1 {
+		t.Errorf("caret count = %d, want exactly 1", n)
+	}
+}
+
+func TestEditViewScrollsToKeepCaretVisible(t *testing.T) {
+	var words []string
+	for i := range 40 {
+		words = append(words, fmt.Sprintf("w%d", i))
+	}
+	v := newField(strings.Join(words, " "))
+	v.CursorEnd()
+	block, h := v.EditView(24, 4)
+	if h != 4 {
+		t.Fatalf("height = %d, want capped at 4", h)
+	}
+	if strings.Contains(block, "w0 ") {
+		t.Errorf("first line still visible — block did not scroll toward the caret")
+	}
+	last := strings.Split(block, "\n")[h-1]
+	if !strings.Contains(last, "\x1b[7m") {
+		t.Errorf("caret not on the last visible line: %q", last)
+	}
+}
+
+func TestEditViewSplitsOversizedWord(t *testing.T) {
+	v := newField(strings.Repeat("x", 100))
+	block, h := v.EditView(42, 6)
+	if h != 3 {
+		t.Fatalf("height = %d, want 3 (100 cells across a 40-cell text width)", h)
+	}
+	for _, line := range strings.Split(block, "\n") {
+		if w := lipgloss.Width(line); w > 42 {
+			t.Errorf("line width %d, want ≤ 42", w)
+		}
+	}
+}
+
+func TestEditViewEmptyShowsPlaceholder(t *testing.T) {
+	v := newVimInput()
+	v.Placeholder = "new task"
+	block, h := v.EditView(60, 6)
+	if h != 1 {
+		t.Fatalf("height = %d, want 1", h)
+	}
+	if !strings.Contains(block, "new task") || !strings.Contains(block, "\x1b[7m") {
+		t.Errorf("placeholder view = %q, want dim text and a caret", block)
+	}
+}
+
+func TestEditViewFullLastLineWrapsEolCaret(t *testing.T) {
+	v := newField(strings.Repeat("x", 28))
+	block, h := v.EditView(30, 6)
+	if h != 2 {
+		t.Fatalf("height = %d, want 2 — the EOL caret needs its own line", h)
+	}
+	for _, line := range strings.Split(block, "\n") {
+		if w := lipgloss.Width(line); w > 30 {
+			t.Errorf("line width %d, want ≤ 30", w)
+		}
+	}
+	if n := strings.Count(block, "\x1b[7m"); n != 1 {
+		t.Errorf("caret count = %d, want exactly 1", n)
 	}
 }

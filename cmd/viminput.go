@@ -4,11 +4,13 @@ Copyright © 2025 Andrew Anter <andrew.anter@gmail.com>
 package cmd
 
 import (
+	"strings"
 	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/rivo/uniseg"
 )
 
 type vimState int
@@ -44,7 +46,6 @@ type vimInput struct {
 func newVimInput() vimInput {
 	t := textinput.New()
 	t.Prompt = "❯ "
-	t.SetWidth(60)
 	return vimInput{Model: t, state: vimInsert}
 }
 
@@ -61,6 +62,118 @@ func (v vimInput) modeTag() string {
 		return vimNormalTagStyle().Render("n") + " "
 	}
 	return vimInsertTagStyle().Render("i") + " "
+}
+
+// maxEditLines caps the wrapped edit block so a huge task cannot eat
+// the whole screen.
+const maxEditLines = 6
+
+// EditView renders the field word-wrapped into visual lines that fit
+// width cells: long text stays fully visible instead of sliding
+// through a one-line viewport, which loses the characters under the
+// caret at the right screen edge. The caret rides the wrapped text,
+// and when the block needs more than maxLines the lines scroll
+// vertically to keep the caret on screen. Returns the block and its
+// height. The caller owns the mode tag and label prefix; continuation
+// lines align under the prompt.
+func (v vimInput) EditView(width, maxLines int) (string, int) {
+	rs := v.runes()
+	promptW := uniseg.StringWidth(v.Prompt)
+	pad := strings.Repeat(" ", promptW)
+	textW := max(10, width-promptW)
+
+	if len(rs) == 0 {
+		line := v.Prompt + vimCaretStyle().Render(" ")
+		if v.Placeholder != "" {
+			line += dimStyle().Render(v.Placeholder)
+		}
+		return line, 1
+	}
+
+	segs := wrapRunes(rs, textW)
+	pos := min(v.Position(), len(rs))
+	caretSeg := len(segs) - 1
+	for i, s := range segs {
+		if pos < s.e {
+			caretSeg = i
+			break
+		}
+	}
+	// A full last line plus an end-of-line caret would push the caret
+	// one cell past the width; give it its own line instead.
+	if pos == len(rs) {
+		last := segs[caretSeg]
+		w := 0
+		for _, r := range rs[last.s:last.e] {
+			w += uniseg.StringWidth(string(r))
+		}
+		if w >= textW {
+			segs = append(segs, runeSeg{len(rs), len(rs)})
+			caretSeg = len(segs) - 1
+		}
+	}
+	top := 0
+	if caretSeg >= maxLines {
+		top = caretSeg - maxLines + 1
+	}
+	vis := segs[top:]
+	if len(vis) > maxLines {
+		vis = vis[:maxLines]
+	}
+
+	lines := make([]string, len(vis))
+	for k, s := range vis {
+		i := top + k
+		var b strings.Builder
+		if i == 0 {
+			b.WriteString(v.Prompt)
+		} else {
+			b.WriteString(pad)
+		}
+		for j := s.s; j < s.e; j++ {
+			if j == pos {
+				b.WriteString(vimCaretStyle().Render(string(rs[j])))
+			} else {
+				b.WriteString(string(rs[j]))
+			}
+		}
+		if i == caretSeg && pos == len(rs) {
+			b.WriteString(vimCaretStyle().Render(" "))
+		}
+		lines[k] = b.String()
+	}
+	return strings.Join(lines, "\n"), len(lines)
+}
+
+// runeSeg is [s, e) of a visual line within the logical line.
+type runeSeg struct{ s, e int }
+
+// wrapRunes greedily breaks the text at space boundaries so each
+// visual line fits width cells; words longer than width are split.
+func wrapRunes(rs []rune, width int) []runeSeg {
+	var segs []runeSeg
+	start, col, brk := 0, 0, -1
+	for i := 0; i < len(rs); i++ {
+		w := uniseg.StringWidth(string(rs[i]))
+		if col+w > width && i > start {
+			if brk > start {
+				segs = append(segs, runeSeg{start, brk})
+				start = brk
+			} else {
+				segs = append(segs, runeSeg{start, i})
+				start = i
+			}
+			col, brk = 0, -1
+			for j := start; j < i; j++ {
+				col += uniseg.StringWidth(string(rs[j]))
+			}
+		}
+		if rs[i] == ' ' {
+			brk = i + 1
+		}
+		col += w
+	}
+	return append(segs, runeSeg{start, len(rs)})
 }
 
 func (v *vimInput) HandleKey(msg tea.KeyPressMsg) (vimAction, tea.Cmd) {

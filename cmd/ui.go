@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"todo/task"
 )
@@ -115,15 +116,21 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, listItem list.
 		return
 	}
 	text := it.row.item.Text
-	if it.row.item.Done {
-		text = dimStyle().Strikethrough(true).Render(text)
-	}
 	num := numStyle().Render(fmt.Sprintf("%4d.", it.row.num))
 	done := doneStyle().Render(fmt.Sprintf("%-*s", doneColW, strings.TrimSpace(it.row.item.PrettyDone())))
 	pri := priStyle(it.row.item.Priority).Render(fmt.Sprintf("%-*s", priColW, strings.TrimSpace(it.row.item.PrettyP())))
 	created := dimStyle().Render(fmt.Sprintf("%-*s", dateColW, it.row.item.PrettyCreated()))
 	completed := dimStyle().Render(fmt.Sprintf("%-*s", dateColW, it.row.item.PrettyCompleted()))
-	line := fmt.Sprintf("%s %s %s %s %s %s", num, done, pri, created, completed, text)
+	prefix := fmt.Sprintf("%s %s %s %s %s ", num, done, pri, created, completed)
+	if w := m.Width(); w > 0 {
+		if avail := w - 2 - lipgloss.Width(prefix); avail > 0 {
+			text = fitCells(text, avail)
+		}
+	}
+	if it.row.item.Done {
+		text = dimStyle().Strikethrough(true).Render(text)
+	}
+	line := prefix + text
 	if index == m.Index() {
 		fmt.Fprint(w, selectedStyle().Render("▸ "+line))
 		return
@@ -477,7 +484,6 @@ func (m uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetWidth(msg.Width)
-		m.input.SetWidth(msg.Width - 6)
 		m.resizeList()
 		return m, nil
 
@@ -736,6 +742,14 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// fitCells truncates s to width cells with an ellipsis; ANSI-aware, so
+// it can clamp already-styled strings. List rows, the status line, and
+// help must stay on one screen line; the wrapped edit view shows the
+// full text.
+func fitCells(s string, width int) string {
+	return ansi.Truncate(s, width, "…")
+}
+
 // contentHeight is the space left for the main body once header,
 // status/input line, and help are subtracted.
 func (m uiModel) contentHeight() int {
@@ -877,30 +891,46 @@ func (m uiModel) View() tea.View {
 		header = lipgloss.JoinHorizontal(lipgloss.Left, append([]string{chip}, tabs...)...)
 	}
 
+	// The edit block is laid out before the body: when it wraps to
+	// several lines the list shrinks to keep the footer on screen.
+	var inputLine string
+	inputH := 1
+	inInput := m.mode == modeAdd || m.mode == modeEdit || m.mode == modeNewProject || m.mode == modeRename
+	if inInput {
+		var label string
+		switch m.mode {
+		case modeAdd:
+			label = "add  "
+		case modeEdit:
+			label = "edit "
+		case modeNewProject:
+			label = "project "
+		case modeRename:
+			label = "rename  "
+		}
+		prefix := m.input.modeTag() + label
+		avail := max(20, m.width-lipgloss.Width(prefix))
+		maxLines := min(maxEditLines, m.contentHeight()-2)
+		block, h := m.input.EditView(avail, max(1, maxLines))
+		inputLine = lipgloss.JoinHorizontal(lipgloss.Top, prefix, block)
+		inputH = h
+	} else if m.status != "" {
+		text := m.status
+		if m.width > 0 {
+			text = fitCells(text, m.width)
+		}
+		inputLine = statusStyle(m.isDark).Render(text)
+	}
+
+	bodyH := max(1, m.contentHeight()-(inputH-1))
+	m.list.SetSize(m.width, bodyH)
 	body := m.list.View()
 	if inProjects {
 		// The projects screen drops the task-list chrome — its rows
 		// already list every project — and reclaims both lines, so
 		// total height (and thus the footer position) matches the
 		// task list.
-		body = lipgloss.NewStyle().Height(m.contentHeight() + 2).Render(m.projectsView())
-	}
-
-	var inputLine string
-	inInput := m.mode == modeAdd || m.mode == modeEdit || m.mode == modeNewProject || m.mode == modeRename
-	switch m.mode {
-	case modeAdd:
-		inputLine = m.input.modeTag() + "add  " + m.input.View()
-	case modeEdit:
-		inputLine = m.input.modeTag() + "edit " + m.input.View()
-	case modeNewProject:
-		inputLine = m.input.modeTag() + "project " + m.input.View()
-	case modeRename:
-		inputLine = m.input.modeTag() + "rename  " + m.input.View()
-	default:
-		if m.status != "" {
-			inputLine = statusStyle(m.isDark).Render(m.status)
-		}
+		body = lipgloss.NewStyle().Height(bodyH + 2).Render(m.projectsView())
 	}
 
 	var footer string
@@ -914,6 +944,13 @@ func (m uiModel) View() tea.View {
 	}
 
 	parts := []string{header}
+	if m.width > 0 && footer != "" {
+		clamped := make([]string, 0, 8)
+		for _, l := range strings.Split(footer, "\n") {
+			clamped = append(clamped, fitCells(l, m.width))
+		}
+		footer = strings.Join(clamped, "\n")
+	}
 	if !inProjects {
 		parts = append(parts, columnHeader())
 	}
@@ -998,4 +1035,10 @@ func vimInsertTagStyle() lipgloss.Style {
 
 func vimNormalTagStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220"))
+}
+
+// vimCaretStyle renders the caret block over the character under the
+// edit cursor in the wrapped input view.
+func vimCaretStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Inline(true).Reverse(true)
 }
