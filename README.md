@@ -91,6 +91,8 @@ td complete 1            # aliases: c, comp — mark item #1 done
 td reopen 1              # alias: uncomplete — mark item #1 pending
 td delete 1              # aliases: rm, del — remove item #1
 td delete --completed    # remove every completed task
+td gitlab link gym group/generator/gym  # optional issue mirror (see GitLab sync)
+td gitlab sync                         # pull issues, push completion state
 ```
 
 ### Commands
@@ -391,10 +393,10 @@ completes what you are reading without leaving the screen first.
 
 ### Text fields: vim editing
 
-The add, edit, describe, and project fields open in INSERT mode. `esc`
-switches to NORMAL (the line shows a small `i`/`n` tag); `enter`
-commits from either mode, and `esc` again in NORMAL cancels the edit.
-In NORMAL mode the field behaves like a one-line vim buffer:
+The add, edit, describe, project, and GitLab fields open in INSERT
+mode. `esc` switches to NORMAL (the line shows a small `i`/`n` tag);
+`enter` commits from either mode, and `esc` again in NORMAL cancels
+the edit. In NORMAL mode the field behaves like a one-line vim buffer:
 
 | Keys                       | Effect                                            |
 | -------------------------- | ------------------------------------------------- |
@@ -490,6 +492,12 @@ cmd/                 # cobra commands (flag parsing, output, orchestration)
   completed.go       # `completed`
   edit.go            # `edit`
   delete.go          # `delete` / `rm` / `del`, single and --completed
+  gitlab.go          # `gitlab` status/link/unlink/sync/create + shared sync runner
+  search.go          # relevance-ranked `/` filtering for the TUI
+gitlab/              # optional GitLab integration
+  client.go          # REST v4 client: list/read issues, close/reopen, create
+  sync.go            # local↔remote sync: import open issues, push state, resolve conflicts
+  settings.go        # gitlab_url/gitlab_token/gitlab_projects read/write, comment-preserving
 task/                # domain types and persistence
   task.go            # Item, Project, Store, sort order, SaveStore, ReadStore (+ legacy migration)
   lock.go            # advisory flock on a .lock sidecar (unix; no-op elsewhere)
