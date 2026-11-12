@@ -127,15 +127,25 @@ func runList(opts listOptions) error {
 
 	if opts.AsJSON {
 		type entry struct {
-			Index       int    `json:"Index"`
-			Text        string `json:"Text"`
-			Description string `json:"Description,omitzero"`
-			Priority    int    `json:"Priority"`
-			Done        bool   `json:"Done"`
+			Index         int    `json:"Index"`
+			Text          string `json:"Text"`
+			Description   string `json:"Description,omitzero"`
+			Priority      int    `json:"Priority"`
+			Done          bool   `json:"Done"`
+			GitLabIssue   int    `json:"GitLabIssue,omitzero"`
+			GitLabProject string `json:"GitLabProject,omitzero"`
 		}
 		out := make([]entry, len(rows))
 		for k, r := range rows {
-			out[k] = entry{Index: r.Index, Text: r.Item.Text, Description: r.Item.Description, Priority: r.Item.Priority, Done: r.Item.Done}
+			out[k] = entry{
+				Index:         r.Index,
+				Text:          r.Item.Text,
+				Description:   r.Item.Description,
+				Priority:      r.Item.Priority,
+				Done:          r.Item.Done,
+				GitLabIssue:   r.Item.GitLabIssue,
+				GitLabProject: r.Item.GitLabProject,
+			}
 		}
 		return json.NewEncoder(os.Stdout).Encode(out)
 	}

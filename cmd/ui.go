@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"todo/gitlab"
 	"todo/task"
 )
 
@@ -152,12 +154,7 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, listItem list.
 // Pure mutation helpers — everything that touches items goes through
 // these so the mapping is covered by tests.
 func toggleItem(items []task.Item, fileIdx int) {
-	items[fileIdx].Done = !items[fileIdx].Done
-	if items[fileIdx].Done {
-		items[fileIdx].Completed = time.Now()
-	} else {
-		items[fileIdx].Completed = time.Time{}
-	}
+	items[fileIdx].MarkDone(!items[fileIdx].Done, time.Now())
 }
 
 func deleteItem(items []task.Item, fileIdx int) []task.Item {
@@ -170,13 +167,28 @@ const (
 	modeNormal inputMode = iota
 	modeAdd
 	modeEdit
-	modeDescribe   // wrapped field editing the selected item's description
-	modeProjects   // full-page projects screen (p to manage, m to pick a move target)
-	modeNewProject // textinput for a new project name
-	modeRename     // textinput renaming a project
-	modeDetail     // full read-only view of the focused task
-	modeConfirm    // delete awaiting y/n
+	modeDescribe    // wrapped field editing the selected item's description
+	modeProjects    // full-page projects screen (p to manage, m to pick a move target)
+	modeNewProject  // textinput for a new project name
+	modeRename      // textinput renaming a project
+	modeDetail      // full read-only view of the focused task
+	modeConfirm     // delete awaiting y/n
+	modeGitLab      // full-page GitLab configuration
+	modeGitLabURL   // textinput for the GitLab instance URL
+	modeGitLabToken // textinput for the access token
+	modeGitLabTd    // textinput for the td side of a new link
+	modeGitLabRef   // textinput for the GitLab project path of a link
 )
+
+// isGitLabInput reports whether mode is one of the config page's text
+// fields.
+func isGitLabInput(mode inputMode) bool {
+	switch mode {
+	case modeGitLabURL, modeGitLabToken, modeGitLabTd, modeGitLabRef:
+		return true
+	}
+	return false
+}
 
 // deleteKind selects the object a modeConfirm prompt will remove.
 type deleteKind int
@@ -223,6 +235,7 @@ type uiKeys struct {
 	CycleRev     key.Binding
 	Reload       key.Binding
 	Filter       key.Binding
+	GitLab       key.Binding
 	Help         key.Binding
 }
 
@@ -234,7 +247,7 @@ func (k uiKeys) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Add, k.Detail, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Toggle},
 		{k.Pri1, k.Pri2, k.Pri3, k.Move, k.Pick, k.PrevProject, k.NextProject},
-		{k.Cycle, k.CycleRev, k.Filter, k.Reload, k.Help, k.Quit},
+		{k.Cycle, k.CycleRev, k.Filter, k.Reload, k.GitLab, k.Help, k.Quit},
 	}
 }
 
@@ -259,6 +272,7 @@ func newUIKeys() uiKeys {
 		CycleRev:     key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev view")),
 		Reload:       key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload")),
 		Filter:       key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		GitLab:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "gitlab sync")),
 		Help:         key.NewBinding(key.WithKeys("?", "f1"), key.WithHelp("?", "help")),
 	}
 }
@@ -286,6 +300,20 @@ type uiModel struct {
 	projectsForMove bool
 	// renameTarget is the project name being renamed in modeRename.
 	renameTarget string
+
+	// configPath is the td config file the GitLab page writes; empty
+	// when the page is unavailable.
+	configPath string
+	// gitlab holds the config file's own GitLab settings, so edits made
+	// in the TUI never persist values that came from the environment.
+	gitlab    gitlab.Settings
+	gitlabEnv gitlab.Env
+	// gitlabIdx is the cursor row on the GitLab page: 0 url, 1 token,
+	// 2 and up links.
+	gitlabIdx int
+	// linkDraft is the td project name while the GitLab path input
+	// that follows it is open.
+	linkDraft string
 
 	list   list.Model
 	input  vimInput
@@ -475,6 +503,14 @@ func (m *uiModel) switchProject(delta int) {
 }
 
 func (m *uiModel) refresh(status string) {
+	m.refreshWith(status, false)
+}
+
+// refreshWith rebuilds the visible rows and returns the command the
+// list needs to re-apply an applied filter. keepFilter leaves that
+// search alone, for background updates that must not disturb what the
+// user typed; explicit mutations and view switches clear it.
+func (m *uiModel) refreshWith(status string, keepFilter bool) tea.Cmd {
 	m.status = status
 	rows := visibleRows(m.items, m.view)
 
@@ -490,8 +526,10 @@ func (m *uiModel) refresh(status string) {
 	}
 	// SetItems kick off an async re-filter against any stale filter
 	// text; discard it — view switches show everything.
-	m.list.ResetFilter()
-	m.list.SetItems(lis)
+	if !keepFilter {
+		m.list.ResetFilter()
+	}
+	cmd := m.list.SetItems(lis)
 
 	if keepFileIdx >= 0 {
 		for k := range lis {
@@ -501,6 +539,7 @@ func (m *uiModel) refresh(status string) {
 			}
 		}
 	}
+	return cmd
 }
 
 // persist writes the current snapshot back into the store and to disk
@@ -521,8 +560,289 @@ func (m *uiModel) persist(action string) {
 	m.refresh(action)
 }
 
+// gitlabLinkNames lists the linked td projects in display order.
+func (m uiModel) gitlabLinkNames() []string {
+	names := make([]string, 0, len(m.gitlab.Links))
+	for n := range m.gitlab.Links {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// openGitLab shows the configuration page, starting on the current
+// project's link when it has one.
+func (m *uiModel) openGitLab() {
+	m.mode = modeGitLab
+	m.gitlabIdx = 0
+	for i, n := range m.gitlabLinkNames() {
+		if n == m.project {
+			m.gitlabIdx = i + 2
+			break
+		}
+	}
+}
+
+// saveGitLab persists the settings and adopts them only when the write
+// succeeded, so the page never shows state that is not on disk.
+func (m *uiModel) saveGitLab(next gitlab.Settings) {
+	if m.configPath == "" {
+		m.status = "no config file to write"
+		return
+	}
+	if err := gitlab.SaveSettings(m.configPath, next); err != nil {
+		m.status = fmt.Sprintf("save config: %v", err)
+		return
+	}
+	m.gitlab = next
+	m.status = "saved " + m.configPath
+}
+
+// editGitLabRow opens the field or link under the cursor.
+func (m *uiModel) editGitLabRow() {
+	names := m.gitlabLinkNames()
+	m.input.Placeholder = ""
+	switch {
+	case m.gitlabIdx == 0:
+		m.mode = modeGitLabURL
+		m.input.SetValue(m.gitlab.URL)
+	case m.gitlabIdx == 1:
+		m.mode = modeGitLabToken
+		m.input.SetValue(m.gitlab.Token)
+	default:
+		k := m.gitlabIdx - 2
+		if k >= len(names) {
+			return
+		}
+		m.linkDraft = names[k]
+		m.mode = modeGitLabRef
+		m.input.SetValue(m.gitlab.Links[names[k]])
+	}
+	m.input.Enter()
+	m.input.Focus()
+}
+
+// commitGitLabInput applies one page field. Empty url/token clears
+// it; adding a link validates the td project before asking for the
+// GitLab path that follows.
+func (m *uiModel) commitGitLabInput(text string) {
+	switch m.mode {
+	case modeGitLabURL, modeGitLabToken:
+		next := m.gitlab
+		if m.mode == modeGitLabURL {
+			if text != "" {
+				if err := gitlab.ValidateURL(text); err != nil {
+					m.status = err.Error()
+					m.mode = modeGitLab
+					return
+				}
+			}
+			next.URL = text
+		} else {
+			next.Token = text
+		}
+		m.saveGitLab(next)
+		m.mode = modeGitLab
+
+	case modeGitLabTd:
+		if text == "" {
+			m.status = "link cancelled"
+			m.mode = modeGitLab
+			return
+		}
+		if m.store.Project(text) == nil {
+			m.status = fmt.Sprintf("no project %q — create it first (p)", text)
+			m.mode = modeGitLab
+			return
+		}
+		m.linkDraft = text
+		m.mode = modeGitLabRef
+		m.input.SetValue("")
+		m.input.Enter()
+		m.input.Placeholder = "group/project"
+		m.input.Focus()
+
+	case modeGitLabRef:
+		path := gitlab.NormalizeProjectPath(text)
+		if path == "" {
+			m.status = "link cancelled"
+			m.mode = modeGitLab
+			return
+		}
+		if err := gitlab.ValidateProjectPath(path); err != nil {
+			m.status = err.Error()
+			m.mode = modeGitLab
+			return
+		}
+		if other, ok := m.gitlab.LinkedTo(path, m.linkDraft); ok {
+			m.status = fmt.Sprintf("%s is already linked to %q", path, other)
+			m.mode = modeGitLab
+			return
+		}
+		next := m.gitlab
+		links := make(map[string]string, len(next.Links)+1)
+		for k, v := range next.Links {
+			links[k] = v
+		}
+		links[m.linkDraft] = path
+		next.Links = links
+		m.saveGitLab(next)
+		for i, n := range m.gitlabLinkNames() {
+			if n == m.linkDraft {
+				m.gitlabIdx = i + 2
+				break
+			}
+		}
+		m.mode = modeGitLab
+	}
+}
+
+// removeGitLabLink drops one link. Items keep their issue fields, so
+// relinking the same GitLab project resumes the sync.
+func (m *uiModel) removeGitLabLink(name string) {
+	next := m.gitlab
+	links := make(map[string]string, len(next.Links))
+	for k, v := range next.Links {
+		if k != name {
+			links[k] = v
+		}
+	}
+	next.Links = links
+	m.saveGitLab(next)
+	if last := 1 + len(m.gitlabLinkNames()); m.gitlabIdx > last {
+		m.gitlabIdx = last
+	}
+}
+
+// gitlabSyncedMsg carries a finished background sync.
+type gitlabSyncedMsg struct {
+	reports []syncReport
+	store   task.Store
+	readErr error
+}
+
+// gitlabSyncCmd syncs every link in the background; nil when the
+// integration is unconfigured, so a local-only td never touches the
+// network.
+func (m uiModel) gitlabSyncCmd() tea.Cmd {
+	settings := m.gitlab.WithEnv()
+	if !settings.Configured() || len(settings.Links) == 0 {
+		return nil
+	}
+	dataPath := m.path
+	return func() tea.Msg {
+		reports, store, err := syncLinks(dataPath, settings, nil)
+		return gitlabSyncedMsg{reports: reports, store: store, readErr: err}
+	}
+}
+
+// startupSyncCmd syncs on open only when the project on screen is
+// linked: opening td on a local-only project stays offline.
+func (m uiModel) startupSyncCmd() tea.Cmd {
+	if _, ok := m.gitlab.Link(m.project); !ok {
+		return nil
+	}
+	return m.gitlabSyncCmd()
+}
+
+// gitlabSyncStatus renders a finished sync for the status line.
+func gitlabSyncStatus(msg gitlabSyncedMsg) string {
+	if msg.readErr != nil {
+		return "gitlab: " + msg.readErr.Error()
+	}
+	var total syncReport
+	failed := 0
+	var firstErr error
+	for _, r := range msg.reports {
+		if r.Err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = r.Err
+			}
+			continue
+		}
+		total.Imported += r.Imported
+		total.Completed += r.Completed
+		total.Closed += r.Closed
+		total.Reopened += r.Reopened
+		total.Skipped += r.Skipped
+	}
+	if failed > 0 {
+		return fmt.Sprintf("gitlab: %d of %d links failed: %v", failed, len(msg.reports), firstErr)
+	}
+	return "gitlab: " + total.changeSummary()
+}
+
+// gitlabView renders the configuration page: the instance URL, the
+// token, and one row per project link.
+func (m uiModel) gitlabView() string {
+	names := m.gitlabLinkNames()
+	labelW := 10
+	for _, n := range names {
+		labelW = max(labelW, ansi.StringWidth(n))
+	}
+	row := func(idx int, label, value string) string {
+		cursor := "  "
+		if idx == m.gitlabIdx {
+			cursor = "▸ "
+		}
+		pad := strings.Repeat(" ", max(0, labelW-ansi.StringWidth(label)))
+		line := cursor + label + pad + "  " + value
+		if idx == m.gitlabIdx {
+			return selectedStyle().Render(line)
+		}
+		return line
+	}
+
+	url := m.gitlab.URL
+	if url == "" {
+		url = dimStyle().Render("(not set)")
+	}
+	url += envNote(m.gitlabEnv.URL, "$TODO_GITLAB_URL")
+	token := maskToken(m.gitlab.Token) + envNote(m.gitlabEnv.Token, "$TODO_GITLAB_TOKEN")
+
+	lines := []string{
+		"  " + projectStyle().Render("gitlab"),
+		"",
+		row(0, "url", url),
+		row(1, "token", token),
+		"",
+		"  " + headerStyle().Render("links"),
+	}
+	if len(names) == 0 {
+		lines = append(lines, "  "+dimStyle().Render("none yet — press a to link a td project"))
+	}
+	for i, n := range names {
+		lines = append(lines, row(i+2, n, "→ "+m.gitlab.Links[n]))
+	}
+	if !m.gitlab.WithEnv().Configured() {
+		lines = append(lines, "", "  "+dimStyle().Render("td works without this — fill in url and token to sync"))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// gitlabKeys is the context help for the GitLab page.
+type gitlabKeys struct{}
+
+func (gitlabKeys) ShortHelp() []key.Binding {
+	return []key.Binding{
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "edit")),
+		key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add link")),
+		key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "remove link")),
+		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sync now")),
+		key.NewBinding(key.WithKeys("j", "k"), key.WithHelp("j/k", "move")),
+		key.NewBinding(key.WithKeys("esc", "q", "g"), key.WithHelp("esc", "back to tasks")),
+	}
+}
+
+func (gitlabKeys) FullHelp() [][]key.Binding { return [][]key.Binding{gitlabKeys{}.ShortHelp()} }
+
 func (m uiModel) Init() tea.Cmd {
-	return tea.RequestBackgroundColor
+	cmds := []tea.Cmd{tea.RequestBackgroundColor}
+	if cmd := m.startupSyncCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return tea.Batch(cmds...)
 }
 
 // selected returns the row under the cursor, if any.
@@ -572,6 +892,14 @@ func (m uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.Styles = help.DefaultStyles(m.isDark)
 		return m, nil
 
+	case gitlabSyncedMsg:
+		if msg.readErr == nil {
+			m.store = msg.store
+			m.items = m.store.EnsureProject(m.project).Items
+		}
+		cmd := m.refreshWith(gitlabSyncStatus(msg), true)
+		return m, cmd
+
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
@@ -619,12 +947,16 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// Input modes own the keyboard: enter commits, esc drops to
 	// NORMAL, and a second esc cancels.
-	if m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename {
+	if m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename || isGitLabInput(m.mode) {
 		act, cmd := m.input.HandleKey(msg)
 		switch act {
 		case vimCommit:
 			text := strings.TrimSpace(m.input.Value())
 			m.input.Blur()
+			if isGitLabInput(m.mode) {
+				m.commitGitLabInput(text)
+				return m, nil
+			}
 			switch m.mode {
 			case modeNewProject:
 				if text != "" {
@@ -669,6 +1001,11 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		case vimCancel:
 			m.input.Blur()
+			if isGitLabInput(m.mode) {
+				m.status = "cancelled"
+				m.mode = modeGitLab
+				return m, nil
+			}
 			if m.mode == modeNewProject || m.mode == modeRename {
 				m.mode = modeProjects
 				return m, nil
@@ -679,6 +1016,47 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		default:
 			return m, cmd
 		}
+	}
+
+	// The GitLab page owns the keyboard: j/k move between the url,
+	// the token, and the links; enter edits the row under the cursor.
+	if m.mode == modeGitLab {
+		names := m.gitlabLinkNames()
+		switch keyName {
+		case "up", "k":
+			if m.gitlabIdx > 0 {
+				m.gitlabIdx--
+			}
+		case "down", "j":
+			if m.gitlabIdx < 1+len(names) {
+				m.gitlabIdx++
+			}
+		case "enter":
+			m.editGitLabRow()
+		case "a":
+			m.mode = modeGitLabTd
+			m.input.SetValue("")
+			m.input.Placeholder = "td project"
+			m.input.Enter()
+			m.input.Focus()
+		case "d":
+			if k := m.gitlabIdx - 2; k >= 0 && k < len(names) {
+				m.removeGitLabLink(names[k])
+			} else {
+				m.status = "select a link to remove"
+			}
+		case "s":
+			sync := m.gitlabSyncCmd()
+			if sync == nil {
+				m.status = "GitLab is not configured — set url, token, and a link"
+				return m, nil
+			}
+			m.status = "gitlab: syncing…"
+			return m, sync
+		case "esc", "q", "g":
+			m.mode = modeNormal
+		}
+		return m, nil
 	}
 
 	// The projects screen owns the keyboard. Its verbs mirror the task
@@ -790,6 +1168,10 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.GitLab):
+		m.openGitLab()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Move):
@@ -1101,6 +1483,9 @@ func (m uiModel) detailView() string {
 		{"created", item.PrettyCreated()},
 		{"completed", item.PrettyCompleted()},
 	}
+	if item.Linked() {
+		meta = append(meta, [2]string{"issue", fmt.Sprintf("%s#%d", item.GitLabProject, item.GitLabIssue)})
+	}
 	lines = append(lines, "")
 	for _, kv := range meta {
 		lines = append(lines, dimStyle().Render(fmt.Sprintf("%-10s", kv[0]))+kv[1])
@@ -1132,9 +1517,10 @@ func (m uiModel) View() tea.View {
 
 	inProjects := m.mode == modeProjects || m.mode == modeNewProject || m.mode == modeRename ||
 		(m.mode == modeConfirm && m.confirm != nil && m.confirm.kind == deleteProject)
+	inGitLab := m.mode == modeGitLab || isGitLabInput(m.mode)
 
 	var header string
-	if !inProjects {
+	if !inProjects && !inGitLab {
 		pending, done := 0, 0
 		for _, it := range m.items {
 			if it.Done {
@@ -1181,7 +1567,7 @@ func (m uiModel) View() tea.View {
 	// several lines the list shrinks to keep the footer on screen.
 	var inputLine string
 	inputH := 1
-	inInput := m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename
+	inInput := m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename || isGitLabInput(m.mode)
 	if inInput {
 		var label string
 		switch m.mode {
@@ -1195,6 +1581,14 @@ func (m uiModel) View() tea.View {
 			label = "project "
 		case modeRename:
 			label = "rename  "
+		case modeGitLabURL:
+			label = "url "
+		case modeGitLabToken:
+			label = "token "
+		case modeGitLabTd:
+			label = "link "
+		case modeGitLabRef:
+			label = "project "
 		}
 		prefix := m.input.modeTag() + label
 		avail := max(20, m.width-lipgloss.Width(prefix))
@@ -1225,6 +1619,8 @@ func (m uiModel) View() tea.View {
 		// total height (and thus the footer position) matches the
 		// task list.
 		body = lipgloss.NewStyle().Height(bodyH + 2).Render(m.projectsView())
+	} else if inGitLab {
+		body = lipgloss.NewStyle().Height(bodyH + 2).Render(m.gitlabView())
 	} else if m.mode == modeDetail {
 		body = lipgloss.NewStyle().Height(bodyH+2).MaxHeight(bodyH+2).
 			Padding(0, 2).Render(m.detailView())
@@ -1238,6 +1634,8 @@ func (m uiModel) View() tea.View {
 		footer = m.help.View(confirmKeys{})
 	case inProjects:
 		footer = m.help.View(projectsKeys{moving: m.projectsForMove})
+	case inGitLab:
+		footer = m.help.View(gitlabKeys{})
 	case m.mode == modeDetail:
 		footer = m.help.View(detailKeys{keys: m.keys})
 	default:
@@ -1252,14 +1650,14 @@ func (m uiModel) View() tea.View {
 		}
 		footer = strings.Join(clamped, "\n")
 	}
-	if !inProjects {
+	if !inProjects && !inGitLab {
 		parts = append(parts, columnHeader())
 	}
 	parts = append(parts, body)
 	if pv := m.previewLine(); pv != "" {
 		parts = append(parts, pv)
 	}
-	if inProjects {
+	if inProjects || inGitLab {
 		parts = []string{body}
 	}
 	if inputLine != "" {

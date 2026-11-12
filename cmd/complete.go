@@ -59,8 +59,7 @@ func completeRun(cmd *cobra.Command, args []string) error {
 	// original order keeps indices stable across runs.
 	target := sortedOrderIndices(items)[i-1]
 	if !items[target].Done {
-		items[target].Done = true
-		items[target].Completed = time.Now()
+		items[target].MarkDone(true, time.Now())
 	}
 
 	if err := task.SaveStore(path, store); err != nil {

@@ -63,8 +63,7 @@ func reopenRun(cmd *cobra.Command, args []string) error {
 		// call `td reopen N` unconditionally.
 		return nil
 	}
-	items[target].Done = false
-	items[target].Completed = time.Time{}
+	items[target].MarkDone(false, time.Now())
 
 	if err := task.SaveStore(path, store); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)

@@ -31,7 +31,34 @@ type Item struct {
 	// pending (and for completed items that predate the field).
 	Created   time.Time `json:"Created,omitzero"`
 	Completed time.Time `json:"Completed,omitzero"`
+	// StateChanged is when Done last changed. GitLab marks bugs and
+	// todos closed too, so when the two disagree about completion the
+	// more recent change wins.
+	StateChanged time.Time `json:"StateChanged,omitzero"`
+	// GitLabIssue is the IID of the issue this item mirrors, zero when
+	// the item is local only. IIDs are per project, so GitLabProject
+	// travels with them: moving an item to another td project must not
+	// retarget the number at a different project's issues.
+	GitLabIssue   int    `json:"GitLabIssue,omitzero"`
+	GitLabProject string `json:"GitLabProject,omitzero"`
 }
+
+// MarkDone changes the completion state and records when, so a later
+// sync can tell a local reopen from an older remote close. Completed
+// mirrors the local clock; adopted remote closes pass the remote's
+// closed_at instead.
+func (i *Item) MarkDone(done bool, at time.Time) {
+	i.Done = done
+	i.StateChanged = at
+	if done {
+		i.Completed = at
+	} else {
+		i.Completed = time.Time{}
+	}
+}
+
+// Linked reports whether the item mirrors a GitLab issue.
+func (i Item) Linked() bool { return i.GitLabIssue > 0 && i.GitLabProject != "" }
 
 // ByPri implements sort.Interface for []Item: undone first, then by
 // ascending priority number (1 is highest, 3 is lowest), then in
@@ -176,10 +203,13 @@ func SaveStore(filename string, s Store) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(filename, b)
+	return WriteFileAtomic(filename, b)
 }
 
-func writeFileAtomic(filename string, b []byte) error {
+// WriteFileAtomic writes b to a temp file beside filename and renames
+// it over the target, so a crash mid-write cannot leave a truncated
+// file behind. The result is mode 0640.
+func WriteFileAtomic(filename string, b []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(filename), filepath.Base(filename)+".tmp-*")
 	if err != nil {
 		return err

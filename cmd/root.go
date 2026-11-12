@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"todo/gitlab"
 	"todo/task"
 )
 
@@ -45,6 +46,9 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	}
 
 	model := newUIModel(path, store, projectName())
+	model.configPath = configFilePath()
+	model.gitlab = gitlab.LoadFileSettings(model.configPath)
+	model.gitlabEnv = gitlab.EnvOverrides()
 	if st, ok := readUIState(path); ok {
 		restoreUIState(&model, st, cmd.Flags().Changed("project"))
 	}
@@ -73,6 +77,19 @@ func isTerminal(f *os.File) bool {
 		return false
 	}
 	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// configFilePath is the config file td writes to: the one viper
+// loaded, else $HOME/.todo.yaml (created on first run).
+func configFilePath() string {
+	if p := viper.ConfigFileUsed(); p != "" {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".todo.yaml")
 }
 
 func Execute() {

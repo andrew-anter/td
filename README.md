@@ -36,6 +36,10 @@ in one JSON file; configuration layers through CLI flags,
   in the TUI or `td list` — is directly actionable by `complete`, `edit`,
   `reopen`, and `delete`
 - Machine-readable output (`--json`, `--count`) for scripts and status bars
+- Optional GitLab sync — link a td project to a self-hosted GitLab
+  project and its open issues become tasks; completing a task closes
+  its issue, reopening reopens it. Off unless configured, configured
+  from the TUI (`g`) or `td gitlab link`
 - Bash / zsh / fish completions
 
 ## Requirements
@@ -106,6 +110,11 @@ td delete --completed    # remove every completed task
 | `project create <name>` | —      | Create a new project. Names may contain spaces (quote them on the CLI); leading/trailing whitespace is trimmed, control characters are rejected. |
 | `project delete <name>` | —     | Delete a project and its items (`--force` required when it still has items). |
 | `project rename <old> <new>` | — | Rename a project, keeping its items.                          |
+| `gitlab`          | —            | Show the GitLab sync configuration (optional feature, off by default). |
+| `gitlab link <td> <gl>` | —      | Mirror a td project with a GitLab project path.               |
+| `gitlab unlink <td>` | —         | Stop mirroring a td project.                                  |
+| `gitlab sync [td…]` | —           | Sync every link, or just the named td projects.               |
+| `gitlab create <n>` | —           | Create a GitLab issue for item `n` and link it.               |
 
 Running `td` with no subcommand opens the terminal UI (see below). When
 stdout is not a terminal — pipes, redirects, cron — bare `td` prints the
@@ -164,7 +173,9 @@ $ td list --json
  {"Index":2,"Text":"buy milk","Description":"two liters","Priority":2,"Done":false}]
 ```
 
-`Description` appears only on items that have one.
+`Description` appears only on items that have one. Items mirrored from
+a GitLab issue also carry `GitLabIssue` and `GitLabProject`; local-only
+items omit both.
 
 Filters (`--all`, `--completed`) apply to `--json` output as well; item
 indices stay consistent across views of the same project.
@@ -194,6 +205,92 @@ datafile: /home/you/.tasks.json
 project: gym   # default namespace when no -P is given (default: inbox)
 ```
 
+## GitLab sync (optional)
+
+Link a td project to a project on your (self-hosted) GitLab instance
+and the two stay in step:
+
+- **Issues in** — every open issue becomes a pending item: title →
+  text, body → description, creation date → `Created`. Issues already
+  mirrored are never imported twice.
+- **State out** — completing an item closes its issue, reopening it
+  reopens it. td never creates issues by itself; `td gitlab create <n>`
+  does that for one item on demand.
+- **Both ways** — when the two disagree about completion the more
+  recent change wins: completing an issue in GitLab marks the item done
+  on the next sync (keeping the issue's close date), while a local
+  change made after that close wins instead and is pushed back.
+
+The feature is off until a URL, a token, and at least one link are
+configured. Until then nothing is read from GitLab, no command changes
+behavior, and td never touches the network.
+
+### Configure
+
+Press `g` in the TUI for the GitLab screen — instance URL, token, and
+one row per link, edited in place — or write the keys into the config
+file:
+
+```yaml
+gitlab_url: https://gitlab.example.com
+gitlab_token: glpat-…            # personal access token with api scope
+gitlab_projects:                 # td project → GitLab project path
+  gym: group/generator/gym
+  inbox: group/inbox
+```
+
+`TODO_GITLAB_URL` and `TODO_GITLAB_TOKEN` override the file and are
+never written back to it, so the token can stay in your shell or secret
+manager; the TUI marks the rows the environment overrides. A link needs
+its td project to exist, and one GitLab project backs at most one td
+project — linking the same path twice is refused, or imports and state
+pushes would be duplicated.
+
+The same from the CLI:
+
+```sh
+td gitlab                              # what is configured
+td gitlab link gym group/generator/gym  # the td project must exist
+td gitlab unlink gym
+td gitlab sync                         # every link; or: td gitlab sync gym
+td gitlab create 3                     # push item 3 as a new issue, then link it
+```
+
+### When a sync runs
+
+- `td gitlab sync` from the shell, or `s` on the GitLab screen.
+- Automatically when the TUI opens **on a linked project** — in the
+  background, with the result in the status line (`gitlab: 3 new,
+  1 completed`). Opening td on an unlinked project stays offline.
+
+Links are independent: one failing instance or path does not stop the
+others. Remote work runs outside the data-file lock and the merge into
+the local store happens under it afterwards, so the TUI never waits on
+the network to save a task.
+
+```
+  gitlab
+    url        https://gitlab.example.com
+    token      set (••••a1b2)
+    links
+      gym      → group/generator/gym
+      inbox    → group/inbox
+```
+
+`enter` edits a row, `a` adds a link (td project, then GitLab path),
+`d` removes the selected link, `s` syncs now, `j`/`k` move, and `esc`
+returns to the tasks.
+
+### What ends up in the data file
+
+Linked items store `GitLabIssue` (the issue IID) and `GitLabProject`
+(the project it belongs to) — IIDs are per project, so both travel
+together. An item keeps its link when moved to another td project and
+keeps updating that issue; deleting an item locally leaves its issue
+alone. Matching uses that stored path, so repointing a link at a
+different GitLab project does not retarget old items, and relinking the
+original path resumes them.
+
 ## Data file
 
 Tasks are stored as projects, each holding its items:
@@ -219,7 +316,10 @@ Tasks are stored as projects, each holding its items:
 `Created` is stamped when an item is added, `Completed` when it is
 marked done (and cleared again on reopen). Items written before a
 timestamp existed omit that field and show `-` in the TUI, so older
-files round-trip unchanged.
+files round-trip unchanged. Items mirrored from GitLab add
+`GitLabIssue`, `GitLabProject`, and `StateChanged` (when `Done` last
+changed, which settles completion conflicts); local-only items omit
+all three.
 
 Old pre-project files — a bare JSON array of items — keep working: on
 read they migrate transparently into the `inbox` project, and the new
@@ -275,6 +375,7 @@ show `-` so the columns stay aligned.
 | `tab` / `shift+tab` | cycle views: pending → all → completed        |
 | `/`          | search the current view (text + description); matches are ranked by relevance, `esc` clears |
 | `r`          | reload the data file from disk                       |
+| `g`          | GitLab screen: instance URL, token, and project links; `s` syncs |
 | `?`          | toggle the full keymap                               |
 | `q`, `esc`, `ctrl+c` | quit                                         |
 
