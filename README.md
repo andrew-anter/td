@@ -12,6 +12,9 @@ in one JSON file; configuration layers through CLI flags,
 ## Features
 
 - Interactive terminal UI (Bubble Tea) — browse, add, edit, toggle, filter
+- Vim-style modal editing in every text field — `esc` toggles
+  NORMAL/INSERT; motions, finds, and `d`/`c`/`x`/`s`/`r` operators with
+  counts (see [Terminal UI](#terminal-ui))
 - Projects as namespaces: `td project create gym`, then
   `td add -P gym "squat"`; every command targets one project (`-P`)
 - Move items between projects — `td move <n> <project>` or `m` in the
@@ -246,7 +249,7 @@ show `-` so the columns stay aligned.
 | ------------ | --------------------------------------------------- |
 | `j`/`k`, arrows | move cursor                                       |
 | `enter`/`space` | toggle the selected item done ↔ pending           |
-| `a`          | add a new task (enter commits, esc cancels)          |
+| `a`          | add a new task (enter commits; `esc` drops to NORMAL, `esc` again cancels) |
 | `e`          | edit the selected item's text                        |
 | `d`          | delete the selected item                             |
 | `1` / `2` / `3` | set the selected item's priority                  |
@@ -258,6 +261,26 @@ show `-` so the columns stay aligned.
 | `r`          | reload the data file from disk                       |
 | `?`          | toggle the full keymap                               |
 | `q`, `esc`, `ctrl+c` | quit                                         |
+
+### Text fields: vim editing
+
+The add, edit, and project fields open in INSERT mode. `esc` switches
+to NORMAL (the line shows a small `i`/`n` tag); `enter` commits from
+either mode, and `esc` again in NORMAL cancels the edit. In NORMAL
+mode the field behaves like a one-line vim buffer:
+
+| Keys                       | Effect                                            |
+| -------------------------- | ------------------------------------------------- |
+| `h` `l` `w` `b` `e` `gg` `G` `0` `^` `$` | move; word and line motions         |
+| `f` `F` `t` `T` + char     | jump to / up to a character, forward or back      |
+| `d` + motion, `dd`, `D`    | delete a range / the line / to end of line        |
+| `c` + motion, `cc`, `C`, `S` | change a range / the line / to end; enters INSERT |
+| `x` `s` `r` + char         | delete char under cursor / substitute / replace   |
+| `i` `a` `I` `A`            | return to INSERT (before/after cursor, line start/end) |
+| digits `1`–`9` prefix      | count: repeats the next motion or operator (`3w`, `2dw`, `5x`) |
+
+Emacs-style editing stays available inside INSERT mode (arrows,
+`ctrl-a`/`ctrl-e`/`ctrl-w`/`ctrl-u`).
 
 The project chip in the header shows which namespace the list, the
 numbers, and every mutation belong to — with a position counter (`2/4`)

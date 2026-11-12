@@ -12,7 +12,6 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -231,7 +230,7 @@ type uiModel struct {
 	renameTarget string
 
 	list   list.Model
-	input  textinput.Model
+	input  vimInput
 	help   help.Model
 	keys   uiKeys
 	status string
@@ -256,9 +255,7 @@ func newUIModel(path string, store task.Store, project string) uiModel {
 	l.SetShowHelp(false)
 	l.SetFilteringEnabled(true)
 
-	ti := textinput.New()
-	ti.Prompt = "❯ "
-	ti.SetWidth(60)
+	ti := newVimInput()
 
 	h := help.New()
 
@@ -502,10 +499,12 @@ func (m uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	keyName := msg.String()
 
-	// Input modes own the keyboard: enter commits, esc cancels.
+	// Input modes own the keyboard: enter commits, esc drops to
+	// NORMAL, and a second esc cancels.
 	if m.mode == modeAdd || m.mode == modeEdit || m.mode == modeNewProject || m.mode == modeRename {
-		switch keyName {
-		case "enter":
+		act, cmd := m.input.HandleKey(msg)
+		switch act {
+		case vimCommit:
 			text := strings.TrimSpace(m.input.Value())
 			m.input.Blur()
 			switch m.mode {
@@ -538,7 +537,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.mode = modeNormal
 				return m, nil
 			}
-		case "esc":
+		case vimCancel:
 			m.input.Blur()
 			if m.mode == modeNewProject || m.mode == modeRename {
 				m.mode = modeProjects
@@ -547,10 +546,9 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeNormal
 			m.refresh("cancelled")
 			return m, nil
+		default:
+			return m, cmd
 		}
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		return m, cmd
 	}
 
 	// The projects screen owns the keyboard. Its verbs mirror the task
@@ -582,6 +580,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if !m.projectsForMove {
 				m.mode = modeNewProject
 				m.input.SetValue("")
+				m.input.Enter()
 				m.input.Placeholder = "new project name"
 				m.input.Focus()
 			}
@@ -590,6 +589,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.renameTarget = names[m.pickerIdx]
 				m.mode = modeRename
 				m.input.SetValue(m.renameTarget)
+				m.input.Enter()
 				m.input.Placeholder = ""
 				m.input.Focus()
 			}
@@ -682,6 +682,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Add):
 		m.mode = modeAdd
 		m.input.SetValue("")
+		m.input.Enter()
 		m.input.Placeholder = "new task"
 		m.input.Focus()
 		return m, nil
@@ -691,6 +692,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeEdit
 			m.editingFileIdx = it.row.fileIdx
 			m.input.SetValue(it.row.item.Text)
+			m.input.Enter()
 			m.input.Placeholder = ""
 			m.input.Focus()
 		}
@@ -885,15 +887,16 @@ func (m uiModel) View() tea.View {
 	}
 
 	var inputLine string
+	inInput := m.mode == modeAdd || m.mode == modeEdit || m.mode == modeNewProject || m.mode == modeRename
 	switch m.mode {
 	case modeAdd:
-		inputLine = "add  " + m.input.View()
+		inputLine = m.input.modeTag() + "add  " + m.input.View()
 	case modeEdit:
-		inputLine = "edit " + m.input.View()
+		inputLine = m.input.modeTag() + "edit " + m.input.View()
 	case modeNewProject:
-		inputLine = "project " + m.input.View()
+		inputLine = m.input.modeTag() + "project " + m.input.View()
 	case modeRename:
-		inputLine = "rename  " + m.input.View()
+		inputLine = m.input.modeTag() + "rename  " + m.input.View()
 	default:
 		if m.status != "" {
 			inputLine = statusStyle(m.isDark).Render(m.status)
@@ -901,9 +904,12 @@ func (m uiModel) View() tea.View {
 	}
 
 	var footer string
-	if inProjects {
+	switch {
+	case inInput:
+		footer = m.help.View(vimInputKeys{insert: m.input.state == vimInsert})
+	case inProjects:
 		footer = m.help.View(projectsKeys{moving: m.projectsForMove})
-	} else {
+	default:
 		footer = m.help.View(m.keys)
 	}
 
@@ -983,4 +989,13 @@ func statusStyle(isDark bool) lipgloss.Style {
 		fg = lipgloss.Color("94")
 	}
 	return lipgloss.NewStyle().Foreground(fg)
+}
+
+// vimInsertTagStyle / vimNormalTagStyle mark the field's modal state.
+func vimInsertTagStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42"))
+}
+
+func vimNormalTagStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220"))
 }
