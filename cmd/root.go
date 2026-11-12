@@ -44,8 +44,16 @@ func rootRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read items: %w", err)
 	}
 
-	p := tea.NewProgram(newUIModel(path, store, projectName()))
-	_, err = p.Run()
+	model := newUIModel(path, store, projectName())
+	if st, ok := readUIState(path); ok {
+		restoreUIState(&model, st, cmd.Flags().Changed("project"))
+	}
+
+	p := tea.NewProgram(model)
+	final, err := p.Run()
+	if fm, ok := final.(uiModel); ok {
+		writeUIState(path, uiStateFrom(fm))
+	}
 	return err
 }
 

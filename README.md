@@ -23,6 +23,8 @@ in one JSON file; configuration layers through CLI flags,
   `td add -P gym "squat"`; every command targets one project (`-P`)
 - Move items between projects — `td move <n> <project>` or `m` in the
   TUI — and manage projects full-screen with `p` (new, rename, delete)
+- Quit-and-reopen continuity: the TUI returns to the last project,
+  tab, and selected item
 - Plain CLI subcommands for scripts; bare `td` piped to a file falls
   back to printing the pending list
 - Single binary (`td`), single JSON data file, atomic crash-safe writes
@@ -326,6 +328,13 @@ completed view is `td delete 4` / `td reopen 4` in that project.
 Because the TUI holds a full snapshot, changes made by *other*
 processes while the UI is open are picked up by pressing `r` (the last
 save wins).
+
+When you quit, the UI remembers the project, tab, and selected task
+and returns you there on reopen — so `td` always picks up where you
+left off. State lives per data file in
+`~/.local/state/td/ui.json` (`$XDG_STATE_HOME`); an explicit `-P`
+overrides the remembered project, and a task that was deleted or
+renamed since simply lands on the first row.
 
 **Waybar / status bars:** for a count in any status bar, exec the CLI —
 e.g. waybar (the `format` glyph is FA Free "hat-wizard", U+F6E8 — use
