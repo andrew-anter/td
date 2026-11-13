@@ -65,6 +65,13 @@ type uiRow struct {
 	num     int
 	fileIdx int
 	item    task.Item
+	// strike/exit drive the completion animation (doneanim.go): strike
+	// is the fraction of the text already crossed out, exit the
+	// fade-and-slide progress of a departing row. Both zero = static.
+	strike float64
+	exit   float64
+	// visual marks rows inside the visual-mode selection.
+	visual bool
 }
 
 // visibleRows returns the rows for the given view, numbered and
@@ -117,7 +124,7 @@ const (
 
 // rowDelegate renders a row: global number, done marker, priority,
 // creation date, completion date, text.
-type rowDelegate struct{}
+type rowDelegate struct{ dark bool }
 
 func (d rowDelegate) Height() int                               { return 1 }
 func (d rowDelegate) Spacing() int                              { return 0 }
@@ -134,14 +141,53 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, listItem list.
 	pri := priStyle(it.row.item.Priority).Render(fmt.Sprintf("%-*s", priColW, strings.TrimSpace(it.row.item.PrettyP())))
 	created := dimStyle().Render(fmt.Sprintf("%-*s", dateColW, it.row.item.PrettyCreated()))
 	completed := dimStyle().Render(fmt.Sprintf("%-*s", dateColW, it.row.item.PrettyCompleted()))
-	prefix := fmt.Sprintf("%s %s %s %s %s ", num, done, pri, created, completed)
+	sep := " "
+	if it.row.visual {
+		// Back each column and the gaps individually: one wrap around
+		// the whole line would let the columns' inner resets punch
+		// unstyled holes through the selection background.
+		vs := visualStyle(d.dark)
+		num, done, pri, created, completed = vs.Render(num), vs.Render(done), vs.Render(pri), vs.Render(created), vs.Render(completed)
+		sep = vs.Render(" ")
+	}
+	prefix := num + sep + done + sep + pri + sep + created + sep + completed + sep
 	if w := m.Width(); w > 0 {
 		if avail := w - 2 - lipgloss.Width(prefix); avail > 0 {
 			text = fitCells(text, avail)
 		}
 	}
-	if it.row.item.Done {
+	switch {
+	case it.row.exit > 0:
+		// Departing row: the column colors collapse into one gray that
+		// fades toward the background while the row drifts right.
+		plain := fmt.Sprintf("%4d. %-*s %-*s %-*s %-*s ",
+			it.row.num,
+			doneColW, strings.TrimSpace(it.row.item.PrettyDone()),
+			priColW, strings.TrimSpace(it.row.item.PrettyP()),
+			dateColW, it.row.item.PrettyCreated(),
+			dateColW, it.row.item.PrettyCompleted())
+		st := exitStyle(it.row.exit, d.dark)
+		line := strings.Repeat(" ", int(it.row.exit*it.row.exit*animSlideCells)) +
+			st.Render(plain) + st.Strikethrough(true).Render(text)
+		if w := m.Width(); w > 0 {
+			line = fitCells(line, w-2)
+		}
+		if index == m.Index() {
+			fmt.Fprint(w, selectedStyle().Render("▸ "+line))
+			return
+		}
+		fmt.Fprint(w, "  "+line)
+		return
+	case it.row.strike > 0:
+		// Sweep: the struck prefix grows left → right across the text.
+		n := int(it.row.strike * float64(lipgloss.Width(text)))
+		text = dimStyle().Strikethrough(true).Render(ansi.Truncate(text, n, "")) +
+			ansi.TruncateLeft(text, n, "")
+	case it.row.item.Done:
 		text = dimStyle().Strikethrough(true).Render(text)
+	}
+	if it.row.visual {
+		text = visualStyle(d.dark).Render(text)
 	}
 	line := prefix + text
 	if index == m.Index() {
@@ -173,6 +219,7 @@ const (
 	modeRename      // textinput renaming a project
 	modeDetail      // full read-only view of the focused task
 	modeConfirm     // delete awaiting y/n
+	modeVisual      // vim-style selection over the task list
 	modeGitLab      // full-page GitLab configuration
 	modeGitLabURL   // textinput for the GitLab instance URL
 	modeGitLabToken // textinput for the access token
@@ -202,23 +249,27 @@ const (
 // The label is captured when the prompt opens so the text cannot drift
 // while the answer is pending.
 type pendingDelete struct {
-	kind    deleteKind
-	fileIdx int
-	project string
-	label   string
+	kind     deleteKind
+	fileIdxs []int
+	project  string
+	label    string
 }
 
 func (p pendingDelete) prompt() string {
 	if p.kind == deleteProject {
 		return fmt.Sprintf("delete project %q? y confirm · n cancel", p.project)
 	}
-	return fmt.Sprintf("delete %q? y confirm · n cancel", p.label)
+	if len(p.fileIdxs) == 1 {
+		return fmt.Sprintf("delete %q? y confirm · n cancel", p.label)
+	}
+	return fmt.Sprintf("delete %s? y confirm · n cancel", p.label)
 }
 
 type uiKeys struct {
 	Quit         key.Binding
 	Detail       key.Binding
 	Toggle       key.Binding
+	Visual       key.Binding
 	Add          key.Binding
 	Edit         key.Binding
 	EditExternal key.Binding
@@ -240,12 +291,12 @@ type uiKeys struct {
 }
 
 func (k uiKeys) ShortHelp() []key.Binding {
-	return []key.Binding{k.Add, k.Detail, k.Toggle, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Move, k.Pick, k.Cycle, k.Filter, k.Quit}
+	return []key.Binding{k.Add, k.Detail, k.Toggle, k.Visual, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Move, k.Pick, k.Cycle, k.Filter, k.Quit}
 }
 
 func (k uiKeys) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Add, k.Detail, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Toggle},
+		{k.Add, k.Detail, k.Edit, k.EditExternal, k.Describe, k.Delete, k.Toggle, k.Visual},
 		{k.Pri1, k.Pri2, k.Pri3, k.Move, k.Pick, k.PrevProject, k.NextProject},
 		{k.Cycle, k.CycleRev, k.Filter, k.Reload, k.GitLab, k.Help, k.Quit},
 	}
@@ -256,6 +307,7 @@ func newUIKeys() uiKeys {
 		Quit:         key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
 		Detail:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "details")),
 		Toggle:       key.NewBinding(key.WithKeys("x", "space"), key.WithHelp("x", "toggle done")),
+		Visual:       key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "visual select")),
 		Add:          key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 		Edit:         key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 		EditExternal: key.NewBinding(key.WithKeys("E"), key.WithHelp("E", "edit in $EDITOR")),
@@ -300,6 +352,11 @@ type uiModel struct {
 	projectsForMove bool
 	// renameTarget is the project name being renamed in modeRename.
 	renameTarget string
+	// visualAnchor is the list index where visual mode started; -1
+	// when no selection is live. moveFileIdxs carries a visual-mode
+	// batch into the projects screen for m.
+	visualAnchor int
+	moveFileIdxs []int
 
 	// configPath is the td config file the GitLab page writes; empty
 	// when the page is unavailable.
@@ -323,6 +380,10 @@ type uiModel struct {
 	width  int
 	height int
 	isDark bool
+	// anim choreographs a just-completed row; doneFlash is the deadline
+	// of the completed tab's green flash (see doneanim.go).
+	anim      *doneAnim
+	doneFlash time.Time
 }
 
 // newUIModel builds the TUI over an already-loaded snapshot. When the
@@ -334,7 +395,7 @@ func newUIModel(path string, store task.Store, project string) uiModel {
 	}
 	p := store.EnsureProject(project)
 
-	l := list.New([]list.Item{}, rowDelegate{}, 0, 0)
+	l := list.New([]list.Item{}, rowDelegate{dark: true}, 0, 0)
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowPagination(false)
@@ -347,15 +408,16 @@ func newUIModel(path string, store task.Store, project string) uiModel {
 	h := help.New()
 
 	m := uiModel{
-		path:    path,
-		store:   store,
-		project: project,
-		items:   p.Items,
-		list:    l,
-		input:   ti,
-		help:    h,
-		keys:    newUIKeys(),
-		isDark:  true,
+		path:         path,
+		store:        store,
+		project:      project,
+		items:        p.Items,
+		list:         l,
+		input:        ti,
+		help:         h,
+		keys:         newUIKeys(),
+		isDark:       true,
+		visualAnchor: -1,
 	}
 	m.refresh("")
 	return m
@@ -467,23 +529,37 @@ func (m uiModel) panelNames() []string {
 	return m.projectNames()
 }
 
-// moveSelectedTo relocates the item under the cursor into dest,
-// keeping its priority and done state, and saves immediately.
+// moveSelectedTo relocates the item under the cursor — or the whole
+// visual-mode batch carried in moveFileIdxs — into dest, keeping
+// priority and done state, and saves immediately.
 func (m *uiModel) moveSelectedTo(dest string) {
-	it, ok := m.selected()
-	if !ok {
-		return
+	idxs := m.moveFileIdxs
+	m.moveFileIdxs = nil
+	if len(idxs) == 0 {
+		it, ok := m.selected()
+		if !ok {
+			return
+		}
+		idxs = []int{it.row.fileIdx}
 	}
 	d := m.store.Project(dest)
 	if d == nil {
 		m.status = fmt.Sprintf("no such project %q", dest)
 		return
 	}
+	moved := make([]task.Item, 0, len(idxs))
+	for _, fi := range idxs {
+		moved = append(moved, m.items[fi])
+	}
 	src := m.store.EnsureProject(m.project)
-	src.Items = append(src.Items[:it.row.fileIdx], src.Items[it.row.fileIdx+1:]...)
-	d.Items = append(d.Items, it.row.item)
+	src.Items = deleteItems(src.Items, idxs)
+	d.Items = append(d.Items, moved...)
 	m.items = src.Items
-	m.persist(fmt.Sprintf("moved %q to %q", it.row.item.Text, dest))
+	if len(idxs) == 1 {
+		m.persist(fmt.Sprintf("moved %q to %q", moved[0].Text, dest))
+	} else {
+		m.persist(fmt.Sprintf("moved %d tasks to %q", len(idxs), dest))
+	}
 }
 
 // switchProject moves the view to the delta-th next project, wrapping
@@ -512,6 +588,13 @@ func (m *uiModel) refresh(status string) {
 // user typed; explicit mutations and view switches clear it.
 func (m *uiModel) refreshWith(status string, keepFilter bool) tea.Cmd {
 	m.status = status
+	// A rebuild replaces every displayed row, which retires any
+	// in-flight completion ghost along with it.
+	m.anim = nil
+	if m.mode == modeVisual {
+		m.mode = modeNormal
+	}
+	m.visualAnchor = -1
 	rows := visibleRows(m.items, m.view)
 
 	// Keep the cursor on the same underlying item when possible.
@@ -531,13 +614,21 @@ func (m *uiModel) refreshWith(status string, keepFilter bool) tea.Cmd {
 	}
 	cmd := m.list.SetItems(lis)
 
+	found := false
 	if keepFileIdx >= 0 {
 		for k := range lis {
 			if lis[k].(uiItem).row.fileIdx == keepFileIdx {
 				m.list.Select(k)
+				found = true
 				break
 			}
 		}
+	}
+	if !found {
+		// The item under the cursor is gone (completed, deleted):
+		// hold the screen position, clamped into the new list — the
+		// list itself only clamps pages, not the cursor.
+		m.list.Select(min(m.list.Index(), max(0, len(lis)-1)))
 	}
 	return cmd
 }
@@ -889,6 +980,7 @@ func (m uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BackgroundColorMsg:
 		m.isDark = msg.IsDark()
 		m.list.Styles = list.DefaultStyles(m.isDark)
+		m.list.SetDelegate(rowDelegate{dark: m.isDark})
 		m.help.Styles = help.DefaultStyles(m.isDark)
 		return m, nil
 
@@ -899,6 +991,9 @@ func (m uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmd := m.refreshWith(gitlabSyncStatus(msg), true)
 		return m, cmd
+
+	case doneAnimTickMsg:
+		return m, m.stepDoneAnim()
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
@@ -928,10 +1023,21 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.deleteProject(pd.project)
 			} else {
 				m.mode = modeNormal
-				if pd.fileIdx >= 0 && pd.fileIdx < len(m.items) {
-					m.items = deleteItem(m.items, pd.fileIdx)
-					m.persist(fmt.Sprintf("deleted %q", pd.label))
+				idxs := make([]int, 0, len(pd.fileIdxs))
+				for _, fi := range pd.fileIdxs {
+					if fi >= 0 && fi < len(m.items) {
+						idxs = append(idxs, fi)
+					}
 				}
+				if len(idxs) > 0 {
+					m.items = deleteItems(m.items, idxs)
+					if len(idxs) == 1 {
+						m.persist(fmt.Sprintf("deleted %q", pd.label))
+					} else {
+						m.persist(fmt.Sprintf("deleted %d tasks", len(idxs)))
+					}
+				}
+				m.applyVisual()
 			}
 		case "n", "N", "esc", "q":
 			m.confirm = nil
@@ -941,8 +1047,15 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.mode = modeNormal
 			}
+			m.applyVisual()
 		}
 		return m, nil
+	}
+
+	// Visual mode owns the keyboard: motions extend the selection and
+	// the batch verbs act on it (see visual.go).
+	if m.mode == modeVisual {
+		return m.handleVisualKey(msg)
 	}
 
 	// Input modes own the keyboard: enter commits, esc drops to
@@ -1110,6 +1223,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "esc", "q", "p":
 			m.mode = modeNormal
 			m.projectsForMove = false
+			m.moveFileIdxs = nil
 		}
 		return m, nil
 	}
@@ -1161,6 +1275,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Pick):
 		m.mode = modeProjects
 		m.projectsForMove = false
+		m.moveFileIdxs = nil
 		m.pickerIdx = 0
 		for i, n := range m.projectNames() {
 			if n == m.project {
@@ -1270,20 +1385,30 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case keyName == "v":
+		m.enterVisual()
+		return m, nil
+
 	case key.Matches(msg, m.keys.Toggle):
+		var cmd tea.Cmd
 		if it, ok := m.selected(); ok {
+			wasDone := m.items[it.row.fileIdx].Done
+			listIdx := m.list.Index()
 			toggleItem(m.items, it.row.fileIdx)
 			state := "pending"
 			if m.items[it.row.fileIdx].Done {
 				state = "done"
 			}
 			m.persist(fmt.Sprintf("%q → %s", it.row.item.Text, state))
+			if !wasDone {
+				cmd = m.beginCompletion(it.row, listIdx)
+			}
 		}
-		return m, nil
+		return m, cmd
 
 	case key.Matches(msg, m.keys.Delete):
 		if it, ok := m.selected(); ok {
-			m.confirm = &pendingDelete{kind: deleteTask, fileIdx: it.row.fileIdx, label: it.row.item.Text}
+			m.confirm = &pendingDelete{kind: deleteTask, fileIdxs: []int{it.row.fileIdx}, label: it.row.item.Text}
 			m.mode = modeConfirm
 		}
 		return m, nil
@@ -1543,9 +1668,12 @@ func (m uiModel) View() tea.View {
 				count = len(m.items)
 			}
 			tab := fmt.Sprintf(" %s (%d) ", label, count)
-			if vm == m.view {
+			switch {
+			case vm == viewDone && time.Now().Before(m.doneFlash):
+				tab = doneFlashStyle().Render(tab)
+			case vm == m.view:
 				tab = activeTabStyle().Render(tab)
-			} else {
+			default:
 				tab = tabStyle().Render(tab)
 			}
 			tabs = append(tabs, tab)
@@ -1602,6 +1730,13 @@ func (m uiModel) View() tea.View {
 			text = fitCells(text, m.width)
 		}
 		inputLine = statusStyle(m.isDark).Render(text)
+	} else if m.mode == modeVisual {
+		lo, hi := m.visualRange()
+		text := fmt.Sprintf("visual: %d selected", hi-lo+1)
+		if m.width > 0 {
+			text = fitCells(text, m.width)
+		}
+		inputLine = statusStyle(m.isDark).Render(text)
 	} else if m.status != "" {
 		text := m.status
 		if m.width > 0 {
@@ -1632,6 +1767,8 @@ func (m uiModel) View() tea.View {
 		footer = m.help.View(vimInputKeys{insert: m.input.state == vimInsert})
 	case m.mode == modeConfirm:
 		footer = m.help.View(confirmKeys{})
+	case m.mode == modeVisual:
+		footer = m.help.View(visualKeys{})
 	case inProjects:
 		footer = m.help.View(projectsKeys{moving: m.projectsForMove})
 	case inGitLab:
@@ -1720,6 +1857,32 @@ func projectStyle() lipgloss.Style {
 
 func tabStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+}
+
+// doneFlashStyle marks the completed tab while a finished row "lands"
+// in it.
+func doneFlashStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42"))
+}
+
+// exitStyle fades a departing row toward the background: down the gray
+// ramp on dark themes, up it on light ones.
+func exitStyle(p float64, dark bool) lipgloss.Style {
+	g := 245 - int(p*12)
+	if !dark {
+		g = 240 + int(p*14)
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("%d", g)))
+}
+
+// visualStyle backs the selected block in visual mode; each column's
+// own color rides on top of it.
+func visualStyle(dark bool) lipgloss.Style {
+	bg := lipgloss.Color("238")
+	if !dark {
+		bg = lipgloss.Color("254")
+	}
+	return lipgloss.NewStyle().Background(bg)
 }
 
 func statusStyle(isDark bool) lipgloss.Style {

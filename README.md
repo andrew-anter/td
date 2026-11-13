@@ -17,6 +17,12 @@ in one JSON file; configuration layers through CLI flags,
 - Vim-style modal editing in every text field — `esc` toggles
   NORMAL/INSERT; motions, finds, and `d`/`c`/`x`/`s`/`r` operators with
   counts (see [Terminal UI](#terminal-ui))
+- Visual selection in the task list — `v` anchors, motions extend, and
+  `x`/`d`/`1-3`/`m` complete, delete, reprioritize, or move the whole
+  batch in one save (see [Terminal UI](#terminal-ui))
+- Animated completion — a strikethrough sweeps the finished row, which
+  slides into the flashing **completed** tab; the change is saved
+  before the animation starts, so it never blocks or loses work
 - Optional per-item descriptions — `td add -D "notes" "task"`,
   `td describe <n> "notes"`, and `D` in the TUI; `E` edits the title
   and description together in `$EDITOR`, git-commit style; the selected
@@ -360,11 +366,31 @@ the task text. Items without a recorded timestamp — pending items in
 the completion column, and anything created before timestamps existed —
 show `-` so the columns stay aligned.
 
+Completing a task is animated so you can see where it went: a
+strikethrough sweeps across the text, the row holds for a beat, then
+slides away and fades out while the **completed** tab flashes green.
+The change is saved before the animation starts, and the cursor moves
+to the next pending task immediately, so you can keep working. In the
+`all` view the row stays put and only the sweep plays; reopening a task
+is instant.
+
+`v` starts a vim-style **visual selection**: the row under the cursor
+is highlighted, `j`/`k` (and the other list motions) extend the
+highlighted range, and the batch verbs act on every selected row at
+once — `x` completes them all (or reopens them all if every selected
+row is already done), `d` deletes them behind one confirmation,
+`1`/`2`/`3` set their priority, and `m` moves the whole batch to
+another project. `esc` or `v` again cancels; any single-item verb
+(edit, details, …) drops the selection first and acts on the cursor
+row. Batch completion saves once and flashes the completed tab without
+the per-row animation.
+
 | Key          | Action                                              |
 | ------------ | --------------------------------------------------- |
 | `j`/`k`, arrows | move cursor                                       |
 | `enter`       | open the detail screen for the focused task (`enter`/`esc`/`q` back) |
 | `x`/`space` | toggle the selected item done ↔ pending           |
+| `v`          | visual selection: extend with motions, then `x`/`d`/`1-3`/`m` act on the whole range (`esc` cancels) |
 | `a`          | add a new task (enter commits; `esc` drops to NORMAL, `esc` again cancels) |
 | `e`          | edit the selected item's text                        |
 | `E`          | edit title + description in `$EDITOR` (git-style buffer: title first line, then description after a blank line) |
