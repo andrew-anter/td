@@ -6,7 +6,7 @@ inside **projects** — namespaces each with its own list and numbering —
 in one JSON file; configuration layers through CLI flags,
 `TODO_`-prefixed environment variables, and a YAML config file.
 
-[![license](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 ![go](https://img.shields.io/badge/Go-1.25-00ADD8)
 
 ## Features
@@ -537,4 +537,4 @@ go test ./...    # or: make test
 
 ## License
 
-Released under the [Apache License 2.0](LICENSE). Copyright 2025 Andrew Anter.
+Released under the [MIT License](LICENSE). Copyright 2025 Andrew Anter.
