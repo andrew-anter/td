@@ -133,8 +133,21 @@ type Project struct {
 	Items []Item `json:"items"`
 }
 
-// Store is the entire data file: an ordered set of projects.
+// Group is a named collection of projects: the top level of the
+// group → project → item hierarchy. Groups hold project names, so a
+// project belongs to at most one group; projects absent from every
+// group are ungrouped. Empty groups are allowed.
+type Group struct {
+	Name     string   `json:"name"`
+	Projects []string `json:"projects"`
+}
+
+// Store is the entire data file: an ordered set of projects plus the
+// groups that organize them.
 type Store struct {
+	// Groups orders the grouped projects for display; omitzero keeps
+	// pre-group data files round-tripping unchanged.
+	Groups   []Group   `json:"groups,omitzero"`
 	Projects []Project `json:"projects"`
 }
 
@@ -159,15 +172,42 @@ func (s *Store) EnsureProject(name string) *Project {
 }
 
 // RemoveProject deletes the named project and reports whether it
-// existed.
+// existed. Group references to it are pruned.
 func (s *Store) RemoveProject(name string) bool {
 	for k := range s.Projects {
 		if s.Projects[k].Name == name {
 			s.Projects = append(s.Projects[:k], s.Projects[k+1:]...)
+			for g := range s.Groups {
+				s.Groups[g].Projects = removeName(s.Groups[g].Projects, name)
+			}
 			return true
 		}
 	}
 	return false
+}
+
+// RenameProject renames a project, keeping its items, and updates
+// every group reference to it.
+func (s *Store) RenameProject(oldName, newName string) error {
+	if err := ValidateProjectName(newName); err != nil {
+		return err
+	}
+	p := s.Project(oldName)
+	if p == nil {
+		return fmt.Errorf("no such project %q", oldName)
+	}
+	if s.Project(newName) != nil {
+		return fmt.Errorf("project %q already exists", newName)
+	}
+	p.Name = newName
+	for g := range s.Groups {
+		for j, n := range s.Groups[g].Projects {
+			if n == oldName {
+				s.Groups[g].Projects[j] = newName
+			}
+		}
+	}
+	return nil
 }
 
 // ProjectNames returns the project names in store order.
@@ -179,17 +219,126 @@ func (s *Store) ProjectNames() []string {
 	return names
 }
 
+// Group returns the named group, or nil when absent.
+func (s *Store) Group(name string) *Group {
+	for k := range s.Groups {
+		if s.Groups[k].Name == name {
+			return &s.Groups[k]
+		}
+	}
+	return nil
+}
+
+// EnsureGroup returns the named group, appending an empty one at the
+// end of the store when it does not exist yet.
+func (s *Store) EnsureGroup(name string) *Group {
+	if g := s.Group(name); g != nil {
+		return g
+	}
+	s.Groups = append(s.Groups, Group{Name: name})
+	return &s.Groups[len(s.Groups)-1]
+}
+
+// RemoveGroup deletes the named group and reports whether it existed.
+// Its projects are kept, becoming ungrouped.
+func (s *Store) RemoveGroup(name string) bool {
+	for k := range s.Groups {
+		if s.Groups[k].Name == name {
+			s.Groups = append(s.Groups[:k], s.Groups[k+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// GroupNames returns the group names in store order.
+func (s *Store) GroupNames() []string {
+	names := make([]string, len(s.Groups))
+	for k, g := range s.Groups {
+		names[k] = g.Name
+	}
+	return names
+}
+
+// GroupOf returns the name of the group holding the named project, or
+// "" when the project is ungrouped or absent.
+func (s *Store) GroupOf(project string) string {
+	for _, g := range s.Groups {
+		for _, n := range g.Projects {
+			if n == project {
+				return g.Name
+			}
+		}
+	}
+	return ""
+}
+
+// SetGroup moves the named project into group, creating the group when
+// needed; an empty group name ungroups the project. The project must
+// exist. A group left empty by the move is kept.
+func (s *Store) SetGroup(project, group string) error {
+	if s.Project(project) == nil {
+		return fmt.Errorf("no such project %q", project)
+	}
+	for k := range s.Groups {
+		s.Groups[k].Projects = removeName(s.Groups[k].Projects, project)
+	}
+	if group != "" {
+		g := s.EnsureGroup(group)
+		g.Projects = append(g.Projects, project)
+	}
+	return nil
+}
+
+// GroupedProjectNames returns project names in display order: each
+// group's projects in group order, then ungrouped projects in store
+// order.
+func (s *Store) GroupedProjectNames() []string {
+	out := make([]string, 0, len(s.Projects))
+	seen := make(map[string]bool, len(s.Projects))
+	for _, g := range s.Groups {
+		for _, n := range g.Projects {
+			if s.Project(n) != nil && !seen[n] {
+				out = append(out, n)
+				seen[n] = true
+			}
+		}
+	}
+	for _, p := range s.Projects {
+		if !seen[p.Name] {
+			out = append(out, p.Name)
+		}
+	}
+	return out
+}
+
+// removeName drops the first occurrence of name from names.
+func removeName(names []string, name string) []string {
+	for k, n := range names {
+		if n == name {
+			return append(names[:k], names[k+1:]...)
+		}
+	}
+	return names
+}
+
 // ValidateProjectName rejects blank names and names containing control
 // characters. Spaces inside a name are allowed — quote the value on
 // the CLI, or just type it in the TUI; callers trim leading/trailing
 // whitespace before validating.
-func ValidateProjectName(name string) error {
+func ValidateProjectName(name string) error { return validateName(name, "project") }
+
+// ValidateGroupName applies the same rules as ValidateProjectName to
+// group names.
+func ValidateGroupName(name string) error { return validateName(name, "group") }
+
+func validateName(name, kind string) error {
 	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("project name must not be empty")
+		return fmt.Errorf("%s name must not be empty", kind)
 	}
 	for _, r := range name {
 		if r < ' ' {
-			return fmt.Errorf("project name %q must not contain control characters", name)
+			return fmt.Errorf("%s name %q must not contain control characters", kind, name)
 		}
 	}
 	return nil
@@ -276,5 +425,38 @@ func ReadStore(filename string) (Store, error) {
 	if err := json.Unmarshal(trimmed, &s); err != nil {
 		return Store{}, err
 	}
+	s.sanitizeGroups()
 	return s, nil
+}
+
+// sanitizeGroups enforces the group invariants on loaded data: every
+// reference names an existing project, no project sits in two groups,
+// and group names are unique. Hand-edited files cannot break display.
+func (s *Store) sanitizeGroups() {
+	exists := make(map[string]bool, len(s.Projects))
+	for _, p := range s.Projects {
+		exists[p.Name] = true
+	}
+	seenGroup := make(map[string]bool, len(s.Groups))
+	seenProject := make(map[string]bool)
+	groups := s.Groups[:0]
+	for _, g := range s.Groups {
+		if seenGroup[g.Name] {
+			continue
+		}
+		seenGroup[g.Name] = true
+		refs := g.Projects[:0]
+		for _, n := range g.Projects {
+			if exists[n] && !seenProject[n] {
+				seenProject[n] = true
+				refs = append(refs, n)
+			}
+		}
+		if len(refs) == 0 {
+			refs = nil
+		}
+		g.Projects = refs
+		groups = append(groups, g)
+	}
+	s.Groups = groups
 }

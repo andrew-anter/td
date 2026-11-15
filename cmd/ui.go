@@ -217,6 +217,7 @@ const (
 	modeProjects    // full-page projects screen (p to manage, m to pick a move target)
 	modeNewProject  // textinput for a new project name
 	modeRename      // textinput renaming a project
+	modeGroup       // textinput assigning a project's group
 	modeDetail      // full read-only view of the focused task
 	modeConfirm     // delete awaiting y/n
 	modeVisual      // vim-style selection over the task list
@@ -352,6 +353,9 @@ type uiModel struct {
 	projectsForMove bool
 	// renameTarget is the project name being renamed in modeRename.
 	renameTarget string
+	// groupTarget is the project name whose group is being edited in
+	// modeGroup.
+	groupTarget string
 	// visualAnchor is the list index where visual mode started; -1
 	// when no selection is live. moveFileIdxs carries a visual-mode
 	// batch into the projects screen for m.
@@ -428,14 +432,14 @@ func (m uiModel) visibleRows() []uiRow {
 	return visibleRows(m.items, m.view)
 }
 
-// projectNames lists the namespaces the switcher cycles through. An
-// empty store still reports the default project so the TUI is usable
-// before anything exists.
+// projectNames lists the namespaces the switcher cycles through, in
+// grouped display order. An empty store still reports the default
+// project so the TUI is usable before anything exists.
 func (m uiModel) projectNames() []string {
 	if len(m.store.Projects) == 0 {
 		return []string{task.DefaultProject}
 	}
-	return m.store.ProjectNames()
+	return m.store.GroupedProjectNames()
 }
 
 // setProject points the model at a namespace without touching disk.
@@ -455,30 +459,41 @@ func (m *uiModel) createProjectInPlace(name string) error {
 		return fmt.Errorf("project %q already exists", name)
 	}
 	m.store.EnsureProject(name)
-	m.pickerIdx = len(m.store.Projects) - 1
+	m.pickerIdx = len(m.projectNames()) - 1
 	m.persist(fmt.Sprintf("created project %q", name))
 	return nil
 }
 
 // renameProject changes the cursor's project (renameTarget) to a new
-// name, keeping its items; the view follows if the current project is
-// the one renamed.
+// name, keeping its items and group membership; the view follows if
+// the current project is the one renamed.
 func (m *uiModel) renameProject(newName string) error {
-	if err := task.ValidateProjectName(newName); err != nil {
+	if err := m.store.RenameProject(m.renameTarget, newName); err != nil {
 		return err
 	}
-	if m.store.Project(newName) != nil {
-		return fmt.Errorf("project %q already exists", newName)
-	}
-	p := m.store.Project(m.renameTarget)
-	if p == nil {
-		return fmt.Errorf("no such project %q", m.renameTarget)
-	}
-	p.Name = newName
 	if m.project == m.renameTarget {
 		m.project = newName
 	}
 	m.persist(fmt.Sprintf("renamed project to %q", newName))
+	return nil
+}
+
+// setProjectGroup assigns a project to a group (empty ungroups),
+// creating the group when needed, and saves.
+func (m *uiModel) setProjectGroup(project, group string) error {
+	if group != "" {
+		if err := task.ValidateGroupName(group); err != nil {
+			return err
+		}
+	}
+	if err := m.store.SetGroup(project, group); err != nil {
+		return err
+	}
+	if group == "" {
+		m.persist(fmt.Sprintf("ungrouped project %q", project))
+	} else {
+		m.persist(fmt.Sprintf("moved project %q to group %q", project, group))
+	}
 	return nil
 }
 
@@ -1060,7 +1075,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// Input modes own the keyboard: enter commits, esc drops to
 	// NORMAL, and a second esc cancels.
-	if m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename || isGitLabInput(m.mode) {
+	if m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename || m.mode == modeGroup || isGitLabInput(m.mode) {
 		act, cmd := m.input.HandleKey(msg)
 		switch act {
 		case vimCommit:
@@ -1084,6 +1099,12 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					if err := m.renameProject(text); err != nil {
 						m.status = err.Error()
 					}
+				}
+				m.mode = modeProjects
+				return m, nil
+			case modeGroup:
+				if err := m.setProjectGroup(m.groupTarget, text); err != nil {
+					m.status = err.Error()
 				}
 				m.mode = modeProjects
 				return m, nil
@@ -1119,7 +1140,7 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.mode = modeGitLab
 				return m, nil
 			}
-			if m.mode == modeNewProject || m.mode == modeRename {
+			if m.mode == modeNewProject || m.mode == modeRename || m.mode == modeGroup {
 				m.mode = modeProjects
 				return m, nil
 			}
@@ -1212,6 +1233,15 @@ func (m uiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.input.SetValue(m.renameTarget)
 				m.input.Enter()
 				m.input.Placeholder = ""
+				m.input.Focus()
+			}
+		case "g":
+			if !m.projectsForMove && m.pickerIdx < len(names) {
+				m.groupTarget = names[m.pickerIdx]
+				m.mode = modeGroup
+				m.input.SetValue(m.store.GroupOf(m.groupTarget))
+				m.input.Enter()
+				m.input.Placeholder = "group name (empty to ungroup)"
 				m.input.Focus()
 			}
 		case "d":
@@ -1496,8 +1526,13 @@ func (m uiModel) projectsView() string {
 			nameW = len(n)
 		}
 	}
-	lines := make([]string, 0, len(names))
+	idx := make(map[string]int, len(names))
 	for i, n := range names {
+		idx[n] = i
+	}
+	// renderProject draws one selectable row; indent applies only in
+	// the grouped tree.
+	renderProject := func(n, indent string) string {
 		pending, done := 0, 0
 		if p := m.store.Project(n); p != nil {
 			for _, it := range p.Items {
@@ -1509,10 +1544,10 @@ func (m uiModel) projectsView() string {
 			}
 		}
 		cursor := "  "
-		if i == m.pickerIdx {
+		if idx[n] == m.pickerIdx {
 			cursor = "▸ "
 		}
-		label := fmt.Sprintf("%-*s", nameW, n)
+		label := fmt.Sprintf("%s%-*s", indent, nameW, n)
 		if n == m.project {
 			label = projectStyle().Render(label)
 		}
@@ -1521,10 +1556,50 @@ func (m uiModel) projectsView() string {
 		if n == m.project {
 			line += "   " + dimStyle().Render("(current)")
 		}
-		if i == m.pickerIdx {
+		if idx[n] == m.pickerIdx {
 			line = selectedStyle().Render(line)
 		}
-		lines = append(lines, line)
+		return line
+	}
+	if len(m.store.Groups) == 0 {
+		lines := make([]string, 0, len(names))
+		for _, n := range names {
+			lines = append(lines, renderProject(n, ""))
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	}
+	// Grouped tree: headers are not selectable; the cursor walks the
+	// projects in panelNames order, which matches the row order here.
+	visible := make(map[string]bool, len(names))
+	for _, n := range names {
+		visible[n] = true
+	}
+	lines := make([]string, 0, len(names)+len(m.store.Groups))
+	for _, g := range m.store.Groups {
+		members := make([]string, 0, len(g.Projects))
+		for _, n := range g.Projects {
+			if visible[n] {
+				members = append(members, n)
+			}
+		}
+		if len(members) == 0 {
+			continue
+		}
+		lines = append(lines, headerStyle().Render(g.Name))
+		for _, n := range members {
+			lines = append(lines, renderProject(n, "  "))
+		}
+	}
+	ungrouped := false
+	for _, n := range names {
+		if m.store.GroupOf(n) != "" {
+			continue
+		}
+		if !ungrouped {
+			lines = append(lines, dimStyle().Render("(ungrouped)"))
+			ungrouped = true
+		}
+		lines = append(lines, renderProject(n, "  "))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
@@ -1545,6 +1620,7 @@ func (p projectsKeys) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select project")),
 		key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "new project")),
 		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "rename")),
+		key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "set group")),
 		key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete empty")),
 		key.NewBinding(key.WithKeys("j", "k"), key.WithHelp("j/k", "move")),
 		key.NewBinding(key.WithKeys("esc", "q", "p"), key.WithHelp("esc", "back to tasks")),
@@ -1640,7 +1716,7 @@ func (m uiModel) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
 
-	inProjects := m.mode == modeProjects || m.mode == modeNewProject || m.mode == modeRename ||
+	inProjects := m.mode == modeProjects || m.mode == modeNewProject || m.mode == modeRename || m.mode == modeGroup ||
 		(m.mode == modeConfirm && m.confirm != nil && m.confirm.kind == deleteProject)
 	inGitLab := m.mode == modeGitLab || isGitLabInput(m.mode)
 
@@ -1679,10 +1755,13 @@ func (m uiModel) View() tea.View {
 			tabs = append(tabs, tab)
 		}
 		chipLabel := m.project
+		if g := m.store.GroupOf(m.project); g != "" {
+			chipLabel = g + " / " + m.project
+		}
 		if names := m.projectNames(); len(names) > 1 {
 			for i, n := range names {
 				if n == m.project {
-					chipLabel = fmt.Sprintf("%s %d/%d", m.project, i+1, len(names))
+					chipLabel = fmt.Sprintf("%s %d/%d", chipLabel, i+1, len(names))
 					break
 				}
 			}
@@ -1695,7 +1774,7 @@ func (m uiModel) View() tea.View {
 	// several lines the list shrinks to keep the footer on screen.
 	var inputLine string
 	inputH := 1
-	inInput := m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename || isGitLabInput(m.mode)
+	inInput := m.mode == modeAdd || m.mode == modeEdit || m.mode == modeDescribe || m.mode == modeNewProject || m.mode == modeRename || m.mode == modeGroup || isGitLabInput(m.mode)
 	if inInput {
 		var label string
 		switch m.mode {
@@ -1709,6 +1788,8 @@ func (m uiModel) View() tea.View {
 			label = "project "
 		case modeRename:
 			label = "rename  "
+		case modeGroup:
+			label = "group "
 		case modeGitLabURL:
 			label = "url "
 		case modeGitLabToken:

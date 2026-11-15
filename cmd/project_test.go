@@ -284,3 +284,123 @@ func TestProjectListShowsCounts(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectCreateWithGroup(t *testing.T) {
+	writeStore(t, task.Store{})
+	projectGroupOpt = "A"
+	t.Cleanup(func() { projectGroupOpt = "" })
+
+	if _, err := captureStdout(t, func() error {
+		return projectCreateRun(nil, []string{"work"})
+	}); err != nil {
+		t.Fatalf("projectCreateRun: %v", err)
+	}
+	got := readStore(t)
+	if got.GroupOf("work") != "A" {
+		t.Errorf("work group = %q, want A", got.GroupOf("work"))
+	}
+}
+
+func TestProjectGroupMoveAndUngroup(t *testing.T) {
+	writeStore(t, task.Store{Projects: []task.Project{{Name: "work"}, {Name: "home"}}})
+
+	for _, args := range [][]string{{"work", "A"}, {"work", "B"}} {
+		if _, err := captureStdout(t, func() error {
+			return projectGroupRun(nil, args)
+		}); err != nil {
+			t.Fatalf("projectGroupRun %v: %v", args, err)
+		}
+	}
+	got := readStore(t)
+	if got.GroupOf("work") != "B" {
+		t.Errorf("work group = %q, want B", got.GroupOf("work"))
+	}
+	if g := got.Group("A"); g == nil || len(g.Projects) != 0 {
+		t.Errorf("group A should be kept empty: %+v", g)
+	}
+
+	if _, err := captureStdout(t, func() error {
+		return projectUngroupRun(nil, []string{"work"})
+	}); err != nil {
+		t.Fatalf("projectUngroupRun: %v", err)
+	}
+	if got := readStore(t); got.GroupOf("work") != "" {
+		t.Errorf("work still grouped: %q", got.GroupOf("work"))
+	}
+	if err := projectGroupRun(nil, []string{"ghost", "A"}); err == nil {
+		t.Errorf("grouping a missing project should error")
+	}
+}
+
+func TestGroupLifecycleCommands(t *testing.T) {
+	writeStore(t, task.Store{Projects: []task.Project{{Name: "work"}}})
+
+	if _, err := captureStdout(t, func() error {
+		return projectCreateGroupRun(nil, []string{"A"})
+	}); err != nil {
+		t.Fatalf("create-group: %v", err)
+	}
+	if err := projectCreateGroupRun(nil, []string{"A"}); err == nil {
+		t.Errorf("duplicate group should error")
+	}
+	if _, err := captureStdout(t, func() error {
+		return projectGroupRun(nil, []string{"work", "A"})
+	}); err != nil {
+		t.Fatalf("group: %v", err)
+	}
+	if _, err := captureStdout(t, func() error {
+		return projectRenameGroupRun(nil, []string{"A", "B"})
+	}); err != nil {
+		t.Fatalf("rename-group: %v", err)
+	}
+	got := readStore(t)
+	if got.Group("A") != nil || got.GroupOf("work") != "B" {
+		t.Errorf("rename-group lost membership: %+v", got.Groups)
+	}
+	if _, err := captureStdout(t, func() error {
+		return projectDeleteGroupRun(nil, []string{"B"})
+	}); err != nil {
+		t.Fatalf("delete-group: %v", err)
+	}
+	got = readStore(t)
+	if got.Group("B") != nil || got.Project("work") == nil || got.GroupOf("work") != "" {
+		t.Errorf("delete-group must keep projects ungrouped: %+v", got)
+	}
+	if err := projectDeleteGroupRun(nil, []string{"ghost"}); err == nil {
+		t.Errorf("deleting a missing group should error")
+	}
+}
+
+// With groups the project list becomes a tree: group rows aggregate
+// their members' counts, members are indented, and ungrouped projects
+// collect under a final header.
+func TestProjectListTree(t *testing.T) {
+	writeStore(t, task.Store{
+		Groups: []task.Group{{Name: "A", Projects: []string{"work"}}},
+		Projects: []task.Project{
+			{Name: "work", Items: []task.Item{{Text: "a", Priority: 2}, {Text: "b", Priority: 2, Done: true}}},
+			{Name: "inbox", Items: []task.Item{{Text: "c", Priority: 2}}},
+		},
+	})
+
+	out, err := captureStdout(t, func() error {
+		return projectListRun(nil, nil)
+	})
+	if err != nil {
+		t.Fatalf("projectListRun: %v", err)
+	}
+	if !strings.Contains(out, "(ungrouped)") || !strings.Contains(out, "inbox") {
+		t.Errorf("tree list missing ungrouped section:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) > 0 && f[0] == "A" {
+			if len(f) != 4 || f[1] != "1" || f[2] != "1" || f[3] != "2" {
+				t.Errorf("group row %q, want aggregate 1 1 2", line)
+			}
+		}
+		if strings.Contains(line, "work") && !strings.Contains(line, "  work") {
+			t.Errorf("member row not indented: %q", line)
+		}
+	}
+}

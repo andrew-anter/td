@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -858,5 +859,94 @@ func TestDeleteProjectWaitsForConfirmation(t *testing.T) {
 	}
 	if got.Project("inbox") == nil {
 		t.Errorf("confirmation deleted the wrong project: %+v", got)
+	}
+}
+
+// The grouped picker renders group headers above indented members,
+// ungrouped projects under a final header, and the cursor walks the
+// projects in that same order.
+func TestProjectsViewGrouped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{
+		Groups: []task.Group{{Name: "A", Projects: []string{"work", "home"}}},
+		Projects: []task.Project{
+			{Name: "inbox"}, {Name: "work"}, {Name: "home"},
+		},
+	}
+	m := newUIModel(path, store, "inbox")
+	m.mode = modeProjects
+
+	if got := m.projectNames(); !reflect.DeepEqual(got, []string{"work", "home", "inbox"}) {
+		t.Fatalf("projectNames = %v, want grouped order", got)
+	}
+	view := m.projectsView()
+	iA := strings.Index(view, "A")
+	iWork := strings.Index(view, "work")
+	iHome := strings.Index(view, "home")
+	iUngrouped := strings.Index(view, "(ungrouped)")
+	iInbox := strings.Index(view, "inbox")
+	if !(iA >= 0 && iA < iWork && iWork < iHome && iHome < iUngrouped && iUngrouped < iInbox) {
+		t.Errorf("grouped tree out of order:\n%s", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "▸") && !strings.Contains(line, "work") {
+			t.Errorf("cursor row %q, want work (pickerIdx 0)", line)
+		}
+	}
+}
+
+// g on the projects screen opens the group field prefilled with the
+// current group; committing assigns (creating the group), an empty
+// commit ungroups, and both persist.
+func TestGroupAssignViaKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{Projects: []task.Project{{Name: "inbox"}, {Name: "work"}}}
+	m := newUIModel(path, store, "inbox")
+	m.width, m.height = 80, 30
+	(&m).resizeList()
+
+	pressKeys(&m, []string{"p", "j", "g"})
+	if m.mode != modeGroup || m.groupTarget != "work" {
+		t.Fatalf("g opened mode=%v target=%q, want modeGroup on work", m.mode, m.groupTarget)
+	}
+	pressKeys(&m, []string{"A", "enter"})
+	if m.mode != modeProjects || m.store.GroupOf("work") != "A" {
+		t.Fatalf("after commit: mode=%v group=%q", m.mode, m.store.GroupOf("work"))
+	}
+	got, err := task.ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	if got.GroupOf("work") != "A" {
+		t.Errorf("group assignment did not persist: %+v", got.Groups)
+	}
+
+	// The header chip shows the full path of a grouped project.
+	m.setProject("work")
+	m.mode = modeNormal
+	if content := m.View().Content; !strings.Contains(content, "A / work") {
+		t.Errorf("header chip lacks group path:\n%s", content)
+	}
+
+	// Empty commit on an ungrouped project is a no-op ungroup.
+	pressKeys(&m, []string{"p", "j", "g", "enter"})
+	if m.mode != modeProjects || m.status != `ungrouped project "inbox"` {
+		t.Errorf("empty commit: mode=%v status=%q", m.mode, m.status)
+	}
+}
+
+// Project cycling follows the grouped display order, not store order.
+func TestSwitchProjectGroupedOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	store := task.Store{
+		Groups:   []task.Group{{Name: "A", Projects: []string{"work", "home"}}},
+		Projects: []task.Project{{Name: "inbox"}, {Name: "work"}, {Name: "home"}},
+	}
+	m := newUIModel(path, store, "inbox")
+	for _, want := range []string{"work", "home", "inbox"} {
+		m.switchProject(1)
+		if m.project != want {
+			t.Fatalf("switchProject: project=%q, want %q", m.project, want)
+		}
 	}
 }

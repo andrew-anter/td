@@ -3,8 +3,9 @@
 A small todo list for the terminal written in Go: a full interactive TUI
 when run from a shell, plain scriptable commands when piped. Tasks live
 inside **projects** — namespaces each with its own list and numbering —
-in one JSON file; configuration layers through CLI flags,
-`TODO_`-prefixed environment variables, and a YAML config file.
+optionally organized into **groups**, in one JSON file; configuration
+layers through CLI flags, `TODO_`-prefixed environment variables, and a
+YAML config file.
 
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 ![go](https://img.shields.io/badge/Go-1.25-00ADD8)
@@ -29,8 +30,12 @@ in one JSON file; configuration layers through CLI flags,
   item's description previews under the list
 - Projects as namespaces: `td project create gym`, then
   `td add -P gym "squat"`; every command targets one project (`-P`)
+- Groups organize projects: `td project create gym -G health`, then
+  `td project group <project> <group>`; the TUI's projects screen shows
+  the group → project tree and `g` sets a project's group
 - Move items between projects — `td move <n> <project>` or `m` in the
-  TUI — and manage projects full-screen with `p` (new, rename, delete)
+  TUI — and manage projects full-screen with `p` (new, rename, delete,
+  set group)
 - Quit-and-reopen continuity: the TUI returns to the last project,
   tab, and selected item
 - Plain CLI subcommands for scripts; bare `td` piped to a file falls
@@ -85,11 +90,12 @@ td add "buy milk"
 td add "write report" --priority 1
 td project create gym    # new namespace
 td add -P gym "squat"    # add into a project
+td project group gym health  # put gym in group "health" (created if missing)
 td list                  # alias: ls — pending items (default project)
 td list -P gym           # pending items of "gym"
 td list --all            # everything, pending and completed
 td completed             # completed items only
-td project               # list projects with counts (alias: projects)
+td project               # list projects with counts; a tree when groups exist
 td move 2 gym            # aliases: mv — item #2 of the current project → gym
 td edit 2 "buy oat milk" # replace item #2's text
 td describe 2 "two liters" # set item #2's description ("" clears it)
@@ -114,10 +120,15 @@ td gitlab sync                         # pull issues, push completion state
 | `reopen <n>`      | `uncomplete` | Mark item `n` as pending (silent no-op if already pending).    |
 | `delete <n>`      | `rm`, `del`  | Delete item `n`, or with `--completed` delete every done item. |
 | `move <n> <proj>` | `mv`         | Move item `n` from the current project into `<proj>` (must exist; state is kept). |
-| `project`         | `projects`   | List projects with pending/done/total counts; the active one is marked `*`. |
+| `project`         | `projects`   | List projects with pending/done/total counts; the active one is marked `*`. With groups, prints a tree with per-group aggregates. |
 | `project create <name>` | —      | Create a new project. Names may contain spaces (quote them on the CLI); leading/trailing whitespace is trimmed, control characters are rejected. |
 | `project delete <name>` | —     | Delete a project and its items (`--force` required when it still has items). |
 | `project rename <old> <new>` | — | Rename a project, keeping its items.                          |
+| `project group <proj> <group>` | — | Move a project into a group (created when missing). |
+| `project ungroup <proj>` | —    | Remove a project from its group.                              |
+| `project create-group <name>` | — | Create an empty group.                                      |
+| `project rename-group <old> <new>` | — | Rename a group.                                          |
+| `project delete-group <name>` | — | Delete a group; its projects are kept, ungrouped.           |
 | `gitlab`          | —            | Show the GitLab sync configuration (optional feature, off by default). |
 | `gitlab link <td> <gl>` | —      | Mirror a td project with a GitLab project path.               |
 | `gitlab unlink <td>` | —         | Stop mirroring a td project.                                  |
@@ -141,6 +152,7 @@ pending list instead, exactly like `td list`.
 | `--count`               | `list`     | `false`              | One-line `{"pending":N,"completed":N,"total":N}` across **all projects**. Ignores filters and `-P`. |
 | `--completed`           | `delete`   | `false`              | Batch-delete all completed tasks instead of one item.  |
 | `--force`               | `project delete` | `false`        | Delete the project even when it still contains items.  |
+| `-G, --group <name>`    | `project create` | —            | Create the project inside this group (created when missing). |
 | `-f, --datafile <path>` | global     | `$HOME/.tasks.json`  | Data file location.                                    |
 | `-c, --config <path>`   | global     | `$HOME/.todo.yaml`   | Config file location.                                  |
 
@@ -155,6 +167,15 @@ and item `3` of `inbox` are different, unrelated items.
 `add -P gym "squat"` requires `gym` to exist — `td project create gym`
 first. Listing an unknown project errors; `inbox` always resolves, even
 on a fresh data file.
+
+Groups add a level above projects: **group → project → item**. A
+project belongs to at most one group; projects in no group are
+ungrouped. `td project create gym -G health` creates the group on
+demand, `td project group gym health` moves an existing project,
+`td project ungroup gym` removes it, and `create-group` /
+`rename-group` / `delete-group` manage groups themselves — deleting a
+group keeps its projects. Grouping is organizational only: commands
+still target one project, and numbering stays per-project.
 
 Display order within a project is: pending items first, then completed;
 within each group, priority ascending (`1` before `3`); otherwise
@@ -398,7 +419,7 @@ the per-row animation.
 | `d`          | delete the selected item (`y` confirms, `n`/`esc` cancels) |
 | `1` / `2` / `3` | set the selected item's priority                  |
 | `m`          | move the selected item to another project (opens the projects screen; enter picks the destination) |
-| `p`          | projects screen: enter select, `a` new, `e` rename, `d` delete (empty only, `y` confirms), esc back |
+| `p`          | projects screen: enter select, `a` new, `e` rename, `g` set group, `d` delete (empty only, `y` confirms), esc back |
 | `[` / `]`    | switch to the previous / next project                |
 | `tab` / `shift+tab` | cycle views: pending → all → completed        |
 | `/`          | search the current view (text + description); matches are ranked by relevance, `esc` clears |
@@ -456,11 +477,13 @@ Emacs-style editing stays available inside INSERT mode (arrows,
 `ctrl-a`/`ctrl-e`/`ctrl-w`/`ctrl-u`).
 
 The project chip in the header shows which namespace the list, the
-numbers, and every mutation belong to — with a position counter (`2/4`)
+numbers, and every mutation belong to — prefixed with its group
+(`health / gym`) when grouped, and with a position counter (`2/4`)
 when more than one project exists. Press `p` for the full-page projects
-screen — just the project rows (name, pending/done counts, current
-marked), no tab bar — where the same verbs keep their meaning: `a`
-creates a project, `e` renames the cursor's project, `d` deletes it
+screen — project rows (name, pending/done counts, current marked) under
+their group headers, no tab bar — where the same verbs keep their
+meaning: `a` creates a project, `e` renames the cursor's project, `g`
+sets its group (empty ungroups), `d` deletes it
 (only once empty, so a keystroke can never destroy a list), and enter
 selects one and drops back to its tasks. Pressing `m` on an item opens
 the same screen as a destination picker. Every mutation is locked and
@@ -511,7 +534,7 @@ cmd/                 # cobra commands (flag parsing, output, orchestration)
   ui.go              # the Bubble Tea terminal UI (views, projects, keymap, delegate)
   add.go             # `add`
   list.go            # `list` / `ls`, shared runList + JSON/count modes
-  project.go         # `project` list/create/delete/rename + project resolution
+  project.go         # `project` list/create/delete/rename, groups + project resolution
   move.go            # `move` / `mv` — cross-project item relocation
   complete.go        # `complete` / `c` / `comp`
   reopen.go          # `reopen` / `uncomplete`

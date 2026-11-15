@@ -288,3 +288,113 @@ func TestDescriptionOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("Description did not round-trip: %+v", got.Projects[0].Items[0])
 	}
 }
+
+func TestStoreGroupMethods(t *testing.T) {
+	s := Store{Projects: []Project{{Name: "inbox"}, {Name: "work"}, {Name: "home"}}}
+	if err := s.SetGroup("work", "A"); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	if err := s.SetGroup("home", "A"); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	if got := s.GroupOf("work"); got != "A" {
+		t.Errorf("GroupOf(work) = %q, want A", got)
+	}
+	if g := s.Group("A"); g == nil || !reflect.DeepEqual(g.Projects, []string{"work", "home"}) {
+		t.Errorf("group A = %+v, want work and home", s.Group("A"))
+	}
+	// Moving to another group leaves the old group empty but intact.
+	if err := s.SetGroup("home", "B"); err != nil {
+		t.Fatalf("SetGroup move: %v", err)
+	}
+	if got := s.GroupOf("home"); got != "B" {
+		t.Errorf("GroupOf(home) = %q, want B", got)
+	}
+	if g := s.Group("A"); g == nil || !reflect.DeepEqual(g.Projects, []string{"work"}) {
+		t.Errorf("group A after move = %+v", s.Group("A"))
+	}
+	if err := s.SetGroup("work", ""); err != nil {
+		t.Fatalf("SetGroup ungroup: %v", err)
+	}
+	if got := s.GroupOf("work"); got != "" {
+		t.Errorf("GroupOf(work) after ungroup = %q", got)
+	}
+	if s.Group("A") == nil {
+		t.Errorf("empty group should be kept")
+	}
+	if err := s.SetGroup("ghost", "A"); err == nil {
+		t.Errorf("SetGroup on a missing project should error")
+	}
+	if !s.RemoveGroup("B") || s.RemoveGroup("B") {
+		t.Errorf("RemoveGroup should report true once, then false")
+	}
+	if s.Project("home") == nil || s.GroupOf("home") != "" {
+		t.Errorf("RemoveGroup must keep its projects, ungrouped")
+	}
+}
+
+func TestGroupedProjectNamesOrder(t *testing.T) {
+	s := Store{
+		Groups: []Group{
+			{Name: "A", Projects: []string{"work", "home"}},
+			{Name: "B", Projects: []string{"gym"}},
+		},
+		Projects: []Project{{Name: "inbox"}, {Name: "work"}, {Name: "home"}, {Name: "gym"}},
+	}
+	want := []string{"work", "home", "gym", "inbox"}
+	if got := s.GroupedProjectNames(); !reflect.DeepEqual(got, want) {
+		t.Errorf("GroupedProjectNames = %v, want %v", got, want)
+	}
+}
+
+// Group membership is stored by name, so renaming or deleting a
+// project must update every reference to it.
+func TestGroupRefsFollowRenameAndDelete(t *testing.T) {
+	s := Store{
+		Groups:   []Group{{Name: "A", Projects: []string{"work", "home"}}},
+		Projects: []Project{{Name: "work"}, {Name: "home"}},
+	}
+	if err := s.RenameProject("work", "job"); err != nil {
+		t.Fatalf("RenameProject: %v", err)
+	}
+	if got := s.Group("A").Projects; !reflect.DeepEqual(got, []string{"job", "home"}) {
+		t.Errorf("refs after rename = %v", got)
+	}
+	s.RemoveProject("home")
+	if got := s.Group("A").Projects; !reflect.DeepEqual(got, []string{"job"}) {
+		t.Errorf("refs after delete = %v", got)
+	}
+}
+
+// Hand-edited files must not break display: dangling refs, duplicate
+// memberships, and duplicate group names are cleaned up on load.
+func TestReadStoreSanitizesGroups(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	raw := `{"groups":[{"name":"A","projects":["work","ghost","work"]},{"name":"A","projects":["home"]},{"name":"B","projects":["work","home"]}],"projects":[{"name":"work","items":[]},{"name":"home","items":[]}]}`
+	if err := os.WriteFile(path, []byte(raw), 0640); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	s, err := ReadStore(path)
+	if err != nil {
+		t.Fatalf("ReadStore: %v", err)
+	}
+	want := []Group{{Name: "A", Projects: []string{"work"}}, {Name: "B", Projects: []string{"home"}}}
+	if !reflect.DeepEqual(s.Groups, want) {
+		t.Errorf("sanitized groups = %+v, want %+v", s.Groups, want)
+	}
+}
+
+// Pre-group data files must round-trip without gaining a groups key.
+func TestGroupsOmittedWhenAbsent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	if err := SaveStore(path, Store{Projects: []Project{{Name: "inbox"}}}); err != nil {
+		t.Fatalf("SaveStore: %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(b), `"groups"`) {
+		t.Errorf("store without groups grew a groups key: %s", b)
+	}
+}

@@ -15,6 +15,7 @@ import (
 )
 
 var projectForceOpt bool
+var projectGroupOpt string
 
 var projectCmd = &cobra.Command{
 	Use:     "project",
@@ -56,6 +57,51 @@ var projectRenameCmd = &cobra.Command{
 	SilenceErrors: true,
 }
 
+var projectGroupCmd = &cobra.Command{
+	Use:           "group PROJECT GROUP",
+	Short:         "Move a project into a group (created when missing).",
+	Args:          cobra.ExactArgs(2),
+	RunE:          projectGroupRun,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+}
+
+var projectUngroupCmd = &cobra.Command{
+	Use:           "ungroup PROJECT",
+	Short:         "Remove a project from its group.",
+	Args:          cobra.ExactArgs(1),
+	RunE:          projectUngroupRun,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+}
+
+var projectCreateGroupCmd = &cobra.Command{
+	Use:           "create-group NAME",
+	Short:         "Create an empty group.",
+	Args:          cobra.ExactArgs(1),
+	RunE:          projectCreateGroupRun,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+}
+
+var projectRenameGroupCmd = &cobra.Command{
+	Use:           "rename-group OLD NEW",
+	Short:         "Rename a group.",
+	Args:          cobra.ExactArgs(2),
+	RunE:          projectRenameGroupRun,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+}
+
+var projectDeleteGroupCmd = &cobra.Command{
+	Use:           "delete-group NAME",
+	Short:         "Delete a group; its projects are kept, ungrouped.",
+	Args:          cobra.ExactArgs(1),
+	RunE:          projectDeleteGroupRun,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+}
+
 // resolveProject finds the project the current command operates on
 // (see projectName). The default project always resolves: with ensure
 // it is created in the store, without it a transient empty project is
@@ -84,7 +130,7 @@ func projectListRun(cmd *cobra.Command, args []string) error {
 	w := tabwriter.NewWriter(os.Stdout, 3, 0, 1, ' ', 0)
 	fmt.Fprintln(w, "PROJECT\tPENDING\tDONE\tTOTAL")
 	active := projectName()
-	for _, p := range store.Projects {
+	row := func(indent, name string, p *task.Project) {
 		done := 0
 		for _, it := range p.Items {
 			if it.Done {
@@ -92,10 +138,51 @@ func projectListRun(cmd *cobra.Command, args []string) error {
 			}
 		}
 		marker := " "
-		if p.Name == active {
+		if name == active {
 			marker = "*"
 		}
-		fmt.Fprintf(w, "%s %s\t%d\t%d\t%d\n", marker, p.Name, len(p.Items)-done, done, len(p.Items))
+		fmt.Fprintf(w, "%s %s%s\t%d\t%d\t%d\n", marker, indent, name, len(p.Items)-done, done, len(p.Items))
+	}
+	if len(store.Groups) == 0 {
+		for k := range store.Projects {
+			row("", store.Projects[k].Name, &store.Projects[k])
+		}
+		return w.Flush()
+	}
+	// With groups the list becomes a tree: group rows carry the
+	// aggregate counts, member projects are indented beneath them.
+	for _, g := range store.Groups {
+		pending, done, total := 0, 0, 0
+		for _, n := range g.Projects {
+			if p := store.Project(n); p != nil {
+				for _, it := range p.Items {
+					if it.Done {
+						done++
+					} else {
+						pending++
+					}
+					total++
+				}
+			}
+		}
+		fmt.Fprintf(w, "%s\t%d\t%d\t%d\n", g.Name, pending, done, total)
+		for _, n := range g.Projects {
+			if p := store.Project(n); p != nil {
+				row("  ", n, p)
+			}
+		}
+	}
+	ungrouped := false
+	for k := range store.Projects {
+		p := &store.Projects[k]
+		if store.GroupOf(p.Name) != "" {
+			continue
+		}
+		if !ungrouped {
+			fmt.Fprintln(w, "(ungrouped)\t\t\t")
+			ungrouped = true
+		}
+		row("  ", p.Name, p)
 	}
 	return w.Flush()
 }
@@ -104,6 +191,12 @@ func projectCreateRun(cmd *cobra.Command, args []string) error {
 	name := strings.TrimSpace(args[0])
 	if err := task.ValidateProjectName(name); err != nil {
 		return err
+	}
+	group := strings.TrimSpace(projectGroupOpt)
+	if group != "" {
+		if err := task.ValidateGroupName(group); err != nil {
+			return err
+		}
 	}
 
 	path := viper.GetString("datafile")
@@ -121,6 +214,11 @@ func projectCreateRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("project %q already exists", name)
 	}
 	store.EnsureProject(name)
+	if group != "" {
+		if err := store.SetGroup(name, group); err != nil {
+			return err
+		}
+	}
 
 	if err := task.SaveStore(path, store); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)
@@ -165,7 +263,33 @@ func projectDeleteRun(cmd *cobra.Command, args []string) error {
 
 func projectRenameRun(cmd *cobra.Command, args []string) error {
 	oldName, newName := strings.TrimSpace(args[0]), strings.TrimSpace(args[1])
-	if err := task.ValidateProjectName(newName); err != nil {
+
+	path := viper.GetString("datafile")
+	unlock, err := task.Lock(path)
+	if err != nil {
+		return fmt.Errorf("failed to lock data file: %w", err)
+	}
+	defer unlock.Close()
+
+	store, err := task.ReadStore(path)
+	if err != nil {
+		return fmt.Errorf("failed to read items: %w", err)
+	}
+	if err := store.RenameProject(oldName, newName); err != nil {
+		return err
+	}
+
+	if err := task.SaveStore(path, store); err != nil {
+		return fmt.Errorf("failed to save items: %w", err)
+	}
+	fmt.Printf("Renamed project %q to %q\n", oldName, newName)
+	return nil
+}
+
+func projectGroupRun(cmd *cobra.Command, args []string) error {
+	project := strings.TrimSpace(args[0])
+	group := strings.TrimSpace(args[1])
+	if err := task.ValidateGroupName(group); err != nil {
 		return err
 	}
 
@@ -180,24 +304,140 @@ func projectRenameRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read items: %w", err)
 	}
-	p := store.Project(oldName)
-	if p == nil {
-		return fmt.Errorf("no such project %q", oldName)
+	if err := store.SetGroup(project, group); err != nil {
+		return err
 	}
-	if store.Project(newName) != nil {
-		return fmt.Errorf("project %q already exists", newName)
-	}
-	p.Name = newName
 
 	if err := task.SaveStore(path, store); err != nil {
 		return fmt.Errorf("failed to save items: %w", err)
 	}
-	fmt.Printf("Renamed project %q to %q\n", oldName, newName)
+	fmt.Printf("Moved project %q to group %q\n", project, group)
+	return nil
+}
+
+func projectUngroupRun(cmd *cobra.Command, args []string) error {
+	project := strings.TrimSpace(args[0])
+
+	path := viper.GetString("datafile")
+	unlock, err := task.Lock(path)
+	if err != nil {
+		return fmt.Errorf("failed to lock data file: %w", err)
+	}
+	defer unlock.Close()
+
+	store, err := task.ReadStore(path)
+	if err != nil {
+		return fmt.Errorf("failed to read items: %w", err)
+	}
+	if err := store.SetGroup(project, ""); err != nil {
+		return err
+	}
+
+	if err := task.SaveStore(path, store); err != nil {
+		return fmt.Errorf("failed to save items: %w", err)
+	}
+	fmt.Printf("Ungrouped project %q\n", project)
+	return nil
+}
+
+func projectCreateGroupRun(cmd *cobra.Command, args []string) error {
+	name := strings.TrimSpace(args[0])
+	if err := task.ValidateGroupName(name); err != nil {
+		return err
+	}
+
+	path := viper.GetString("datafile")
+	unlock, err := task.Lock(path)
+	if err != nil {
+		return fmt.Errorf("failed to lock data file: %w", err)
+	}
+	defer unlock.Close()
+
+	store, err := task.ReadStore(path)
+	if err != nil {
+		return fmt.Errorf("failed to read items: %w", err)
+	}
+	if store.Group(name) != nil {
+		return fmt.Errorf("group %q already exists", name)
+	}
+	store.EnsureGroup(name)
+
+	if err := task.SaveStore(path, store); err != nil {
+		return fmt.Errorf("failed to save items: %w", err)
+	}
+	fmt.Printf("Created group %q\n", name)
+	return nil
+}
+
+func projectRenameGroupRun(cmd *cobra.Command, args []string) error {
+	oldName, newName := strings.TrimSpace(args[0]), strings.TrimSpace(args[1])
+	if err := task.ValidateGroupName(newName); err != nil {
+		return err
+	}
+
+	path := viper.GetString("datafile")
+	unlock, err := task.Lock(path)
+	if err != nil {
+		return fmt.Errorf("failed to lock data file: %w", err)
+	}
+	defer unlock.Close()
+
+	store, err := task.ReadStore(path)
+	if err != nil {
+		return fmt.Errorf("failed to read items: %w", err)
+	}
+	g := store.Group(oldName)
+	if g == nil {
+		return fmt.Errorf("no such group %q", oldName)
+	}
+	if store.Group(newName) != nil {
+		return fmt.Errorf("group %q already exists", newName)
+	}
+	g.Name = newName
+
+	if err := task.SaveStore(path, store); err != nil {
+		return fmt.Errorf("failed to save items: %w", err)
+	}
+	fmt.Printf("Renamed group %q to %q\n", oldName, newName)
+	return nil
+}
+
+func projectDeleteGroupRun(cmd *cobra.Command, args []string) error {
+	name := strings.TrimSpace(args[0])
+
+	path := viper.GetString("datafile")
+	unlock, err := task.Lock(path)
+	if err != nil {
+		return fmt.Errorf("failed to lock data file: %w", err)
+	}
+	defer unlock.Close()
+
+	store, err := task.ReadStore(path)
+	if err != nil {
+		return fmt.Errorf("failed to read items: %w", err)
+	}
+	g := store.Group(name)
+	if g == nil {
+		return fmt.Errorf("no such group %q", name)
+	}
+	members := len(g.Projects)
+	store.RemoveGroup(name)
+
+	if err := task.SaveStore(path, store); err != nil {
+		return fmt.Errorf("failed to save items: %w", err)
+	}
+	if members == 0 {
+		fmt.Printf("Deleted group %q\n", name)
+	} else {
+		fmt.Printf("Deleted group %q (%d projects kept, now ungrouped)\n", name, members)
+	}
 	return nil
 }
 
 func init() {
 	rootCmd.AddCommand(projectCmd)
-	projectCmd.AddCommand(projectCreateCmd, projectDeleteCmd, projectRenameCmd)
+	projectCmd.AddCommand(projectCreateCmd, projectDeleteCmd, projectRenameCmd,
+		projectGroupCmd, projectUngroupCmd, projectCreateGroupCmd, projectRenameGroupCmd, projectDeleteGroupCmd)
 	projectDeleteCmd.Flags().BoolVar(&projectForceOpt, "force", false, "delete the project even when it still has items")
+	projectCreateCmd.Flags().StringVarP(&projectGroupOpt, "group", "G", "", "create the project inside this group (created when missing)")
 }
